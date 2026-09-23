@@ -4,7 +4,7 @@ function getMainUserMenu(userId, firstName) {
   const banner = db.getBanner();
   const isAdmin = db.isAdmin(userId);
   const dbData = db.getDb();
-  const botName = dbData.settings?.bot_name || 'Dimzz Bot';
+  const botName = (dbData.settings && dbData.settings.bot_name) || 'Dimzz Bot';
 
   const caption = `👋 Halo *${firstName || 'Pengguna'}*!\nSelamat datang di *${botName}* 🤖⚡\n\n` +
     `Bot multifungsi siap melayani kebutuhan download video, shortlink, musik, games santai, dan utilitas bermanfaat.\n\n` +

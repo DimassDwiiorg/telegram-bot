@@ -43,8 +43,8 @@ function getServerSpecs(botStartTime) {
 
   return {
     os: `${os.type()} ${os.release()} (${os.arch()})`,
-    cpu: os.cpus()[0]?.model || 'Generic CPU',
-    cpuCores: os.cpus().length,
+    cpu: (os.cpus() && os.cpus()[0] && os.cpus()[0].model) || 'Generic CPU',
+    cpuCores: (os.cpus() && os.cpus().length) || 1,
     ram: `${usedMem} GB / ${totalMem} GB (${memUsagePercent}%)`,
     nodeVersion: process.version,
     uptime: `${days}h ${hours}j ${minutes}m ${seconds}d`

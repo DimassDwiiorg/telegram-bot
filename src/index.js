@@ -28,8 +28,8 @@ bot.use(authMiddleware);
 // HELPER SEND UTAMA: USER MENU DENGAN BANNER
 // ==========================================
 async function sendUserMainMenu(ctx, isEdit = false) {
-  const userId = ctx.from?.id;
-  const firstName = ctx.from?.first_name;
+  const userId = ctx.from ? ctx.from.id : null;
+  const firstName = ctx.from ? ctx.from.first_name : null;
   const { banner, caption, inlineKeyboard } = userMenu.getMainUserMenu(userId, firstName);
 
   try {
@@ -285,7 +285,8 @@ bot.command('admin', adminOnly, async (ctx) => {
 });
 
 bot.command('addadmin', adminOnly, async (ctx) => {
-  const targetId = ctx.message.text.split(' ')[1]?.trim();
+  const parts = ctx.message.text.split(' ');
+  const targetId = parts[1] ? parts[1].trim() : null;
   if (!targetId || isNaN(targetId)) {
     return ctx.reply('⚠️ *Format salah!*\nGunakan: `/addadmin <Telegram_User_ID>`\nContoh: `/addadmin 123456789`', { parse_mode: 'Markdown' });
   }
@@ -299,7 +300,8 @@ bot.command('addadmin', adminOnly, async (ctx) => {
 });
 
 bot.command('deladmin', adminOnly, async (ctx) => {
-  const targetId = ctx.message.text.split(' ')[1]?.trim();
+  const parts = ctx.message.text.split(' ');
+  const targetId = parts[1] ? parts[1].trim() : null;
   if (!targetId) {
     return ctx.reply('⚠️ *Format salah!*\nGunakan: `/deladmin <Telegram_User_ID>`', { parse_mode: 'Markdown' });
   }

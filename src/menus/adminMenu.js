@@ -33,7 +33,7 @@ function getAdminDashboard() {
     `• 👥 Total Pengguna: *${users.length} user*\n` +
     `• 🛡️ Jumlah Admin: *${admins.length} orang*\n` +
     `• 🎶 Koleksi Musik: *${musicList.length} lagu*\n` +
-    `• 🖼️ Banner Tipe: *${dbData.settings?.banner_type || 'url'}*\n\n` +
+    `• 🖼️ Banner Tipe: *${(dbData.settings && dbData.settings.banner_type) || 'url'}*\n\n` +
     `👇 *Pilih menu aksi admin:*`;
 
   const inlineKeyboard = [

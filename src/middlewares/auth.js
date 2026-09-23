@@ -9,7 +9,7 @@ function authMiddleware(ctx, next) {
 }
 
 function adminOnly(ctx, next) {
-  const userId = ctx.from?.id;
+  const userId = ctx.from ? ctx.from.id : null;
   if (!db.isAdmin(userId)) {
     if (ctx.callbackQuery) {
       return ctx.answerCbQuery('⛔ Akses ditolak! Perintah ini khusus Admin.', { show_alert: true });

@@ -90,7 +90,7 @@ function getAdmins() {
 
 function getBanner() {
   const db = getDb();
-  return db.settings?.banner_value || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1080&q=80';
+  return (db.settings && db.settings.banner_value) || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1080&q=80';
 }
 
 function setBanner(bannerValue, type = 'file_id') {
