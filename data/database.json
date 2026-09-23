@@ -1,0 +1,35 @@
+{
+  "settings": {
+    "bot_name": "Dimzz Multi-Function Bot",
+    "banner_type": "url",
+    "banner_value": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1080&q=80",
+    "welcome_text": "👋 Halo *{name}*! Selamat datang di *{bot_name}*.\n\nSilakan pilih menu layanan di bawah ini untuk mulai menggunakan bot:"
+  },
+  "admins": [],
+  "music": [
+    {
+      "id": "track_1",
+      "title": "Chill Lofi Beats - Study Session",
+      "artist": "System",
+      "type": "url",
+      "source": "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3",
+      "added_by": "System",
+      "date": "2026-09-23"
+    },
+    {
+      "id": "track_2",
+      "title": "Ambient Chillout Groove",
+      "artist": "System",
+      "type": "url",
+      "source": "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8c8a73467.mp3?filename=chill-abstract-intention-12099.mp3",
+      "added_by": "System",
+      "date": "2026-09-23"
+    }
+  ],
+  "users": {},
+  "stats": {
+    "total_downloads": 0,
+    "total_shortlinks": 0,
+    "total_games_played": 0
+  }
+}
