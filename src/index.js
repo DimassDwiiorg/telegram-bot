@@ -816,9 +816,10 @@ console.log(`📁 Lokasi: ${__dirname}`);
 console.log(`👑 Owner ID: ${config.ownerId || 'Belum diatur'}`);
 console.log('==============================================');
 
-bot.launch().then(() => {
-  console.log('🚀 Bot berhasil terhubung ke Telegram Server!');
+bot.telegram.getMe().then((me) => {
+  console.log(`🚀 Terhubung sebagai @${me.username} (${me.first_name})`);
   console.log('Bot aktif dalam mode Long Polling (Siap menerima pesan).');
+  return bot.launch();
 }).catch((err) => {
   console.error('❌ Gagal menjalankan bot Telegram:', err.message);
 });
