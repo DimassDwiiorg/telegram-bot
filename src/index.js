@@ -27,26 +27,19 @@ bot.use(authMiddleware);
 // ==========================================
 // HELPER SEND UTAMA: USER MENU DENGAN BANNER
 // ==========================================
-async function sendUserMainMenu(ctx, isEdit = false) {
+async function sendUserMainMenu(ctx) {
   const userId = ctx.from ? ctx.from.id : null;
   const firstName = ctx.from ? ctx.from.first_name : null;
   const { banner, caption, inlineKeyboard } = userMenu.getMainUserMenu(userId, firstName);
 
-  try {
-    if (isEdit && ctx.callbackQuery) {
-      // Jika callback query berasal dari pesan foto, edit caption
-      try {
-        await ctx.editMessageCaption(caption, {
-          parse_mode: 'Markdown',
-          reply_markup: { inline_keyboard: inlineKeyboard }
-        });
-        return;
-      } catch (e) {
-        // Fallback jika pesan sebelumnya bukan media foto (misal teks biasa)
-        await ctx.deleteMessage().catch(() => {});
-      }
-    }
+  // Jika dipanggil dari klik tombol (callback query), hapus pesan sebelumnya agar rapi
+  if (ctx.callbackQuery) {
+    try {
+      await ctx.deleteMessage().catch(() => {});
+    } catch (e) {}
+  }
 
+  try {
     // Kirim pesan baru berupa foto banner + caption + keyboard
     await ctx.replyWithPhoto(banner, {
       caption: caption,
@@ -55,12 +48,23 @@ async function sendUserMainMenu(ctx, isEdit = false) {
     });
   } catch (err) {
     console.error('Error sendUserMainMenu:', err.message);
-    // Jika banner gagal dimuat (misal file_id expired / url 404), kirim fallback teks
+    // Jika banner gagal dimuat, kirim fallback teks
     await ctx.reply(caption, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: inlineKeyboard }
     });
   }
+}
+
+// Helper untuk menampilkan menu baru sambil otomatis menghapus menu sebelumnya
+async function renderMenu(ctx, text, inlineKeyboard) {
+  try {
+    await ctx.deleteMessage().catch(() => {});
+  } catch (e) {}
+  return ctx.reply(text, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: inlineKeyboard }
+  });
 }
 
 // ==========================================
@@ -244,6 +248,11 @@ bot.command('calc', async (ctx) => {
 // FITUR: PING & SERVER STATUS (/ping)
 // ==========================================
 async function replyPingStatus(ctx) {
+  if (ctx.callbackQuery) {
+    try {
+      await ctx.deleteMessage().catch(() => {});
+    } catch (e) {}
+  }
   const start = Date.now();
   const pingMsg = await ctx.reply('📡 *Mengukur latensi server...*', { parse_mode: 'Markdown' });
   const latency = Date.now() - start;
@@ -329,25 +338,25 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'menu_main') {
     adminMenu.clearAdminSession(userId);
     await ctx.answerCbQuery();
-    return sendUserMainMenu(ctx, true);
+    return sendUserMainMenu(ctx);
   }
 
   if (data === 'menu_downloader') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = userMenu.getDownloaderMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data === 'menu_shorturl') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = userMenu.getShorturlMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data === 'menu_music') {
     await ctx.answerCbQuery();
     const { text, buttons } = music.formatMusicMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
+    return renderMenu(ctx, text, buttons);
   }
 
   if (data.startsWith('play_music_')) {
@@ -358,19 +367,19 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'menu_games') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = userMenu.getGamesMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data === 'menu_tools') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = userMenu.getToolsMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data === 'menu_help') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = userMenu.getHelpMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data === 'action_ping') {
@@ -381,77 +390,61 @@ bot.on('callback_query', async (ctx) => {
   // Submenu Tools
   if (data === 'tool_qrcode_help') {
     await ctx.answerCbQuery();
-    return ctx.reply('📱 *Cara Buat QR Code:*\nKetik `/qr <teks atau link>`\nContoh: `/qr https://instagram.com`', {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]] }
-    });
+    return renderMenu(ctx, '📱 *Cara Buat QR Code:*\nKetik `/qr <teks atau link>`\nContoh: `/qr https://instagram.com`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
   }
 
   if (data === 'tool_tts_help') {
     await ctx.answerCbQuery();
-    return ctx.reply('🗣️ *Cara Buat Voice Note (TTS):*\nKetik `/tts <teks>`\nContoh: `/tts Selamat pagi semuanya!`', {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]] }
-    });
+    return renderMenu(ctx, '🗣️ *Cara Buat Voice Note (TTS):*\nKetik `/tts <teks>`\nContoh: `/tts Selamat pagi semuanya!`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
   }
 
   if (data === 'tool_quote') {
     await ctx.answerCbQuery();
     const quote = tools.getRandomQuote();
-    return ctx.reply(`💡 *KATA BIJAK HARI INI*\n\n${quote}`, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🔄 Quote Lain', callback_data: 'tool_quote' }],
-          [{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]
-        ]
-      }
-    });
+    return renderMenu(ctx, `💡 *KATA BIJAK HARI INI*\n\n${quote}`, [
+      [{ text: '🔄 Quote Lain', callback_data: 'tool_quote' }],
+      [{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]
+    ]);
   }
 
   if (data === 'tool_calc_help') {
     await ctx.answerCbQuery();
-    return ctx.reply('🧮 *Kalkulator Cepat:*\nKetik `/calc <ekspresi matematika>`\nContoh: `/calc (150 * 4) / 2`', {
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]] }
-    });
+    return renderMenu(ctx, '🧮 *Kalkulator Cepat:*\nKetik `/calc <ekspresi matematika>`\nContoh: `/calc (150 * 4) / 2`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
   }
 
   // Games Callback
   if (data === 'game_number_start') {
     await ctx.answerCbQuery();
     games.startNumberGame(userId);
-    return ctx.reply(
+    return renderMenu(
+      ctx,
       '🔢 *GAME TEBAK ANGKA DIMULAI!*\n\n' +
       'Saya telah memilih sebuah angka rahasia antara *1 sampai 100*.\n' +
       'Ketik tebakanmu langsung di obrolan ini!\n\n' +
       '_(Ketik /menu untuk berhenti main)_',
-      { parse_mode: 'Markdown' }
+      [[{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]]
     );
   }
 
   if (data === 'game_quiz_start') {
     await ctx.answerCbQuery();
     const quiz = games.getRandomRiddle(userId);
-    return ctx.reply(
+    return renderMenu(
+      ctx,
       `🧩 *KUIS TEBAK-TEBAKAN*\n\n` +
       `❓ *Pertanyaan:*\n"${quiz.q}"\n\n` +
       `💡 *Petunjuk:* ${quiz.hint}\n\n` +
       `Ketik jawabanmu langsung di chat!`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '💡 Tebak-tebakan Lain', callback_data: 'game_quiz_start' }],
-            [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
-          ]
-        }
-      }
+      [
+        [{ text: '💡 Tebak-tebakan Lain', callback_data: 'game_quiz_start' }],
+        [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
+      ]
     );
   }
 
   if (data === 'game_dice') {
     await ctx.answerCbQuery('Melempar dadu...');
+    try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
     await ctx.reply('🎲 *Kamu melempar dadu:*', { parse_mode: 'Markdown' });
     const userDice = await ctx.sendDice({ emoji: '🎲' });
 
@@ -482,6 +475,7 @@ bot.on('callback_query', async (ctx) => {
 
   if (data === 'game_slot') {
     await ctx.answerCbQuery('Memutar mesin slot!');
+    try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
     await ctx.reply('🎰 *Mesin Slot Berputar...*', { parse_mode: 'Markdown' });
     const slot = await ctx.sendDice({ emoji: '🎰' });
 
@@ -508,7 +502,7 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'game_suit_menu') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = userMenu.getSuitMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data.startsWith('suit_')) {
@@ -520,18 +514,14 @@ bot.on('callback_query', async (ctx) => {
     if (res.result === 'win') title = '🎉 KAMU MENANG!';
     if (res.result === 'lose') title = '😢 BOT MENANG!';
 
-    return ctx.reply(
+    return renderMenu(
+      ctx,
       `✊✌️✋ *${title}*\n\n` +
       `Pilihan Kamu: *${res.userChoice}*\nPilihan Bot: *${res.botChoice}*`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔄 Main Lagi', callback_data: 'game_suit_menu' }],
-            [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
-          ]
-        }
-      }
+      [
+        [{ text: '🔄 Main Lagi', callback_data: 'game_suit_menu' }],
+        [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
+      ]
     );
   }
 
@@ -546,57 +536,60 @@ bot.on('callback_query', async (ctx) => {
     adminMenu.clearAdminSession(userId);
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = adminMenu.getAdminDashboard();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data === 'admin_edit_banner') {
     await ctx.answerCbQuery();
     adminMenu.setAdminSession(userId, { action: 'WAITING_BANNER' });
-    return ctx.reply(
+    return renderMenu(
+      ctx,
       '🖼️ *EDIT FOTO BANNER BOT*\n\n' +
       'Silakan *kirimkan foto baru* yang ingin Anda jadikan banner bot.\n' +
       'Atau kirim teks URL gambar (misal: `https://example.com/banner.jpg`).\n\n' +
       '_Ketik /admin untuk membatalkan._',
-      { parse_mode: 'Markdown' }
+      [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
   }
 
   if (data === 'admin_add_music') {
     await ctx.answerCbQuery();
     adminMenu.setAdminSession(userId, { action: 'WAITING_MUSIC' });
-    return ctx.reply(
+    return renderMenu(
+      ctx,
       '🎶 *NAMBAHIN MUSIK DI BOT*\n\n' +
       'Silakan *kirim file audio MP3* langsung ke obrolan ini.\n' +
       'Atau kirim format teks:\n' +
       '`Judul Lagu | https://link-audio-langsung.mp3`\n\n' +
       '_Ketik /admin untuk membatalkan._',
-      { parse_mode: 'Markdown' }
+      [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
   }
 
   if (data === 'admin_add_user') {
     await ctx.answerCbQuery();
     adminMenu.setAdminSession(userId, { action: 'WAITING_ADMIN' });
-    return ctx.reply(
+    return renderMenu(
+      ctx,
       '👥 *TAMBAH ADMIN BARU*\n\n' +
       'Silakan kirimkan *Telegram User ID* pengguna yang ingin dijadikan admin.\n' +
       '_(User ID berupa angka, bisa didapatkan dari @userinfobot)_\n\n' +
       'Contoh: `123456789`\n\n' +
       '_Ketik /admin untuk membatalkan._',
-      { parse_mode: 'Markdown' }
+      [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
   }
 
   if (data === 'admin_list') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = adminMenu.getAdminListMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data === 'admin_manage_music') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = adminMenu.getMusicManageMenu();
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, text, inlineKeyboard);
   }
 
   if (data.startsWith('admin_del_music_')) {
@@ -604,17 +597,18 @@ bot.on('callback_query', async (ctx) => {
     db.deleteMusic(trackId);
     await ctx.answerCbQuery('Lagu berhasil dihapus!');
     const { text, inlineKeyboard } = adminMenu.getMusicManageMenu();
-    return ctx.reply(`🗑️ Lagu telah dihapus.\n\n${text}`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
+    return renderMenu(ctx, `🗑️ Lagu telah dihapus.\n\n${text}`, inlineKeyboard);
   }
 
   if (data === 'admin_broadcast') {
     await ctx.answerCbQuery();
     adminMenu.setAdminSession(userId, { action: 'WAITING_BROADCAST' });
-    return ctx.reply(
+    return renderMenu(
+      ctx,
       '📢 *SIARAN PESAN (BROADCAST)*\n\n' +
       'Silakan ketik teks pengumuman yang akan dikirimkan ke SEMUA pengguna bot.\n\n' +
       '_Ketik /admin untuk membatalkan._',
-      { parse_mode: 'Markdown' }
+      [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
   }
 });
