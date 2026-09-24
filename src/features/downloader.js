@@ -95,6 +95,31 @@ async function downloadTikTokTikwm(url) {
   return null;
 }
 
+// Pilih link video/audio dari field "medias" hasil scrape.
+// Dipisah jadi fungsi murni (tanpa network) supaya bisa ditest langsung -
+// ini yang tadinya buggy: elemen pertama selalu dianggap video walau tipenya audio.
+function pickMediaUrls(data) {
+  let videoUrl = null;
+  let audioUrl = null;
+
+  if (data && data.medias && Array.isArray(data.medias) && data.medias.length > 0) {
+    const vid = data.medias.find(m => m.type === 'video');
+    const aud = data.medias.find(m => m.type === 'audio');
+    if (vid) videoUrl = vid.url;
+    if (aud) audioUrl = aud.url;
+
+    // Fallback terakhir HANYA kalau tidak ada media bertipe jelas (video/audio),
+    // supaya konten audio-only (misal Spotify) tidak salah ditandai sebagai video.
+    if (!videoUrl && !audioUrl && data.medias[0] && data.medias[0].url) {
+      videoUrl = data.medias[0].url;
+    }
+  } else if (data && data.url) {
+    videoUrl = data.url;
+  }
+
+  return { videoUrl, audioUrl };
+}
+
 // Universal Scraper
 async function downloadMedia(targetUrl) {
   const cleanUrl = targetUrl.trim();
@@ -144,23 +169,23 @@ async function downloadMedia(targetUrl) {
 
     if (res.data && res.data.success && res.data.data) {
       const data = res.data.data;
-      // Extract video stream or download link
-      let videoUrl = null;
-      let audioUrl = null;
+      const { videoUrl, audioUrl } = pickMediaUrls(data);
 
-      if (data.medias && Array.isArray(data.medias)) {
-        const vid = data.medias.find(m => m.type === 'video') || data.medias[0];
-        if (vid) videoUrl = vid.url;
-        const aud = data.medias.find(m => m.type === 'audio');
-        if (aud) audioUrl = aud.url;
-      } else if (data.url) {
-        videoUrl = data.url;
+      // Kalau server merespons "success" tapi tidak ada link media sama sekali,
+      // jangan dianggap berhasil - sebelumnya ini bikin bot bilang "Download Berhasil"
+      // padahal tidak ada video/audio yang terkirim ke user.
+      if (!videoUrl && !audioUrl) {
+        return {
+          success: false,
+          error: 'Server merespons tapi tidak ada link media yang valid ditemukan.'
+        };
       }
 
       return {
         success: true,
         platform: platform ? platform.name : 'All Platform',
         title: data.title || 'Video Downloader Result',
+        author: data.author || null,
         videoUrl: videoUrl,
         audioUrl: audioUrl,
         thumbnail: data.thumbnail || null
@@ -178,5 +203,6 @@ async function downloadMedia(targetUrl) {
 
 module.exports = {
   detectPlatform,
-  downloadMedia
+  downloadMedia,
+  pickMediaUrls
 };

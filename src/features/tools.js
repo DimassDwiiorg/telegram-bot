@@ -36,10 +36,13 @@ function getServerSpecs(botStartTime) {
   const minutes = Math.floor((uptimeSeconds % 3600) / 60);
   const seconds = Math.floor(uptimeSeconds % 60);
 
-  const totalMem = (os.totalmem() / (1024 * 1024 * 1024)).toFixed(2);
-  const freeMem = (os.freemem() / (1024 * 1024 * 1024)).toFixed(2);
-  const usedMem = (totalMem - freeMem).toFixed(2);
-  const memUsagePercent = ((usedMem / totalMem) * 100).toFixed(1);
+  const totalMemBytes = os.totalmem();
+  const freeMemBytes = os.freemem();
+  const usedMemBytes = totalMemBytes - freeMemBytes;
+
+  const totalMem = (totalMemBytes / (1024 * 1024 * 1024)).toFixed(2);
+  const usedMem = (usedMemBytes / (1024 * 1024 * 1024)).toFixed(2);
+  const memUsagePercent = ((usedMemBytes / totalMemBytes) * 100).toFixed(1);
 
   return {
     os: `${os.type()} ${os.release()} (${os.arch()})`,
