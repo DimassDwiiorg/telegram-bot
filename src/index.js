@@ -67,12 +67,59 @@ async function renderMenu(ctx, text, inlineKeyboard) {
   });
 }
 
+// Helper generik untuk game "duel dadu" (Dadu, Basket, Bola, Panah, Boling)
+// Pola: user lempar -> bot lempar -> nilai lebih tinggi menang
+async function playDiceDuel(ctx, emoji, label, callbackData) {
+  await ctx.answerCbQuery(`Bermain ${label}...`);
+  try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
+
+  try {
+    await ctx.reply(`${emoji} *Giliranmu main ${label}:*`, { parse_mode: 'Markdown' });
+    const userDice = await ctx.sendDice({ emoji });
+
+    setTimeout(async () => {
+      try {
+        await ctx.reply(`🤖 *Giliran Bot main ${label}:*`, { parse_mode: 'Markdown' });
+        const botDice = await ctx.sendDice({ emoji });
+
+        setTimeout(async () => {
+          try {
+            const uVal = userDice.dice.value;
+            const bVal = botDice.dice.value;
+            let outcome = '🤝 Seri! Kita sama kuat.';
+            if (uVal > bVal) outcome = `🎉 Kamu MENANG! Hasil kamu lebih tinggi!`;
+            if (bVal > uVal) outcome = '🤖 Bot MENANG! Coba lagi ya.';
+
+            db.incrementStat('total_games_played');
+            await ctx.reply(`${emoji} *Hasil ${label}:*\n\nKamu: *${uVal}*\nBot: *${bVal}*\n\n${outcome}`, {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔄 Main Lagi', callback_data: callbackData }],
+                  [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+                ]
+              }
+            });
+          } catch (err) {
+            console.error(`${label} result error:`, err.message);
+          }
+        }, 3000);
+      } catch (err) {
+        console.error(`${label} bot-turn error:`, err.message);
+      }
+    }, 2500);
+  } catch (err) {
+    console.error(`${label} start error:`, err.message);
+  }
+}
+
 // ==========================================
 // COMMANDS DASAR
 // ==========================================
 bot.command(['start', 'menu'], async (ctx) => {
-  // Reset admin session if any
+  // Reset admin session & game aktif jika ada
   adminMenu.clearAdminSession(ctx.from.id);
+  games.clearAllGames(ctx.from.id);
   await sendUserMainMenu(ctx, false);
 });
 
@@ -103,6 +150,14 @@ bot.command('musik', async (ctx) => {
 // ==========================================
 // FITUR: DOWNLOADER (/dl <url>)
 // ==========================================
+// Escape karakter spesial Markdown (_ * ` [) agar judul/author dari hasil scrape
+// (yang seringkali mengandung karakter ini) tidak membuat Telegram gagal parsing
+// caption dan menganggap pengiriman video/audio "gagal" padahal cuma soal format teks.
+function escapeMarkdown(text) {
+  if (!text) return text;
+  return String(text).replace(/([_*`[])/g, '\\$1');
+}
+
 async function handleDownloadRequest(ctx, url) {
   const waitMsg = await ctx.reply('⏳ *Sedang memproses dan mengunduh media... Mohon tunggu sebentar.*', { parse_mode: 'Markdown' });
 
@@ -117,11 +172,13 @@ async function handleDownloadRequest(ctx, url) {
     db.incrementStat('total_downloads');
     await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id).catch(() => {});
 
+    const dbData = db.getDb();
+    const botDisplayName = (dbData.settings && dbData.settings.bot_name) || 'Bot';
     const caption = `✅ *DOWNLOAD BERHASIL!*\n\n` +
       `📌 *Platform:* ${result.platform}\n` +
-      `📝 *Judul:* ${result.title || 'Video'}\n` +
-      (result.author ? `👤 *Author:* ${result.author}\n` : '') +
-      `\n⚡ _Diunduh melalui ${config.botToken ? 'Bot' : 'Dimzz Bot'}_`;
+      `📝 *Judul:* ${escapeMarkdown(result.title) || 'Video'}\n` +
+      (result.author ? `👤 *Author:* ${escapeMarkdown(result.author)}\n` : '') +
+      `\n⚡ _Diunduh melalui ${botDisplayName}_`;
 
     if (result.videoUrl) {
       try {
@@ -130,14 +187,26 @@ async function handleDownloadRequest(ctx, url) {
           parse_mode: 'Markdown'
         });
       } catch (vidErr) {
-        // Jika file terlalu besar untuk bot kirim langsung, berikan link download langsung
+        console.error('Send Video Error:', vidErr.message);
+        // Jika file terlalu besar atau Telegram gagal fetch dari URL, berikan link download langsung
         await ctx.reply(`${caption}\n\n📥 *Link Download Langsung:*\n${result.videoUrl}`, { parse_mode: 'Markdown' });
       }
     } else if (result.audioUrl) {
-      await ctx.replyWithAudio(result.audioUrl, {
-        caption: caption,
-        parse_mode: 'Markdown'
-      });
+      try {
+        await ctx.replyWithAudio(result.audioUrl, {
+          caption: caption,
+          parse_mode: 'Markdown'
+        });
+      } catch (audErr) {
+        console.error('Send Audio Error:', audErr.message);
+        // Sebelumnya kalau kirim audio gagal, bot cuma nampilin error generik tanpa link.
+        // Sekarang disamakan dengan cabang video: tetap kasih link langsung ke user.
+        await ctx.reply(`${caption}\n\n📥 *Link Download Langsung:*\n${result.audioUrl}`, { parse_mode: 'Markdown' });
+      }
+    } else {
+      // Jaga-jaga: kalau entah bagaimana tidak ada videoUrl maupun audioUrl,
+      // jangan diamkan user - kasih tahu secara jelas.
+      await ctx.reply(`⚠️ Media ditemukan tapi tidak ada file yang bisa dikirim.\n\n${caption}`, { parse_mode: 'Markdown' });
     }
 
   } catch (error) {
@@ -337,6 +406,7 @@ bot.on('callback_query', async (ctx) => {
   // Navigasi Menu User
   if (data === 'menu_main') {
     adminMenu.clearAdminSession(userId);
+    games.clearAllGames(userId);
     await ctx.answerCbQuery();
     return sendUserMainMenu(ctx);
   }
@@ -365,7 +435,15 @@ bot.on('callback_query', async (ctx) => {
   }
 
   if (data === 'menu_games') {
+    games.clearAllGames(userId);
     await ctx.answerCbQuery();
+    const { text, inlineKeyboard } = userMenu.getGamesMenu();
+    return renderMenu(ctx, text, inlineKeyboard);
+  }
+
+  if (data === 'game_stop_all') {
+    games.clearAllGames(userId);
+    await ctx.answerCbQuery('Game dihentikan.');
     const { text, inlineKeyboard } = userMenu.getGamesMenu();
     return renderMenu(ctx, text, inlineKeyboard);
   }
@@ -421,8 +499,8 @@ bot.on('callback_query', async (ctx) => {
       '🔢 *GAME TEBAK ANGKA DIMULAI!*\n\n' +
       'Saya telah memilih sebuah angka rahasia antara *1 sampai 100*.\n' +
       'Ketik tebakanmu langsung di obrolan ini!\n\n' +
-      '_(Ketik /menu untuk berhenti main)_',
-      [[{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]]
+      `_(Sesi otomatis berakhir setelah ${games.GAME_TIMEOUT_MS / 60000} menit tidak aktif)_`,
+      [[{ text: '🛑 Berhenti Main', callback_data: 'game_stop_all' }]]
     );
   }
 
@@ -437,65 +515,96 @@ bot.on('callback_query', async (ctx) => {
       `Ketik jawabanmu langsung di chat!`,
       [
         [{ text: '💡 Tebak-tebakan Lain', callback_data: 'game_quiz_start' }],
-        [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
+        [{ text: '🛑 Berhenti Main', callback_data: 'game_stop_all' }]
+      ]
+    );
+  }
+
+  if (data === 'game_word_start') {
+    await ctx.answerCbQuery();
+    const { scrambled, hint } = games.startWordGame(userId);
+    return renderMenu(
+      ctx,
+      `🔤 *TEBAK KATA ACAK*\n\n` +
+      `Susun ulang huruf berikut menjadi sebuah kata:\n\n` +
+      `🔠 \`${scrambled.toUpperCase()}\`\n\n` +
+      `💡 *Petunjuk:* ${hint}\n\n` +
+      `Ketik jawabanmu langsung di chat!`,
+      [
+        [{ text: '🔄 Kata Lain', callback_data: 'game_word_start' }],
+        [{ text: '🛑 Berhenti Main', callback_data: 'game_stop_all' }]
+      ]
+    );
+  }
+
+  if (data === 'game_math_start') {
+    await ctx.answerCbQuery();
+    const question = games.startMathGame(userId);
+    return renderMenu(
+      ctx,
+      `🧮 *HITUNG CEPAT!*\n\n` +
+      `Berapa hasil dari:\n\n` +
+      `🔢 \`${question} = ?\`\n\n` +
+      `Ketik jawabanmu secepat mungkin!`,
+      [
+        [{ text: '🔄 Soal Lain', callback_data: 'game_math_start' }],
+        [{ text: '🛑 Berhenti Main', callback_data: 'game_stop_all' }]
       ]
     );
   }
 
   if (data === 'game_dice') {
-    await ctx.answerCbQuery('Melempar dadu...');
-    try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
-    await ctx.reply('🎲 *Kamu melempar dadu:*', { parse_mode: 'Markdown' });
-    const userDice = await ctx.sendDice({ emoji: '🎲' });
+    return playDiceDuel(ctx, '🎲', 'Lempar Dadu', 'game_dice');
+  }
 
-    setTimeout(async () => {
-      await ctx.reply('🤖 *Giliran Bot melempar dadu:*', { parse_mode: 'Markdown' });
-      const botDice = await ctx.sendDice({ emoji: '🎲' });
+  if (data === 'game_sport_basket') {
+    return playDiceDuel(ctx, '🏀', 'Basket', 'game_sport_basket');
+  }
 
-      setTimeout(async () => {
-        const uVal = userDice.dice.value;
-        const bVal = botDice.dice.value;
-        let outcome = '🤝 Seri! Kita sama kuat.';
-        if (uVal > bVal) outcome = '🎉 Kamu MENANG! Dadu kamu lebih tinggi!';
-        if (bVal > uVal) outcome = '🤖 Bot MENANG! Coba lempar lagi.';
+  if (data === 'game_sport_bola') {
+    return playDiceDuel(ctx, '⚽', 'Sepak Bola', 'game_sport_bola');
+  }
 
-        await ctx.reply(`🎯 *Hasil Pertandingan Dadu:*\n\nKamu: *${uVal}* 🎲\nBot: *${bVal}* 🎲\n\n${outcome}`, {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🔄 Lempar Lagi', callback_data: 'game_dice' }],
-              [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
-            ]
-          }
-        });
-      }, 3000);
-    }, 2500);
-    return;
+  if (data === 'game_sport_panah') {
+    return playDiceDuel(ctx, '🎯', 'Lempar Panah', 'game_sport_panah');
+  }
+
+  if (data === 'game_sport_boling') {
+    return playDiceDuel(ctx, '🎳', 'Boling', 'game_sport_boling');
   }
 
   if (data === 'game_slot') {
     await ctx.answerCbQuery('Memutar mesin slot!');
     try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
-    await ctx.reply('🎰 *Mesin Slot Berputar...*', { parse_mode: 'Markdown' });
-    const slot = await ctx.sendDice({ emoji: '🎰' });
+    try {
+      await ctx.reply('🎰 *Mesin Slot Berputar...*', { parse_mode: 'Markdown' });
+      const slot = await ctx.sendDice({ emoji: '🎰' });
 
-    setTimeout(async () => {
-      // Nilai 64 adalah Jackpot 777 di Telegram
-      const isJackpot = slot.dice.value === 64;
-      const text = isJackpot
-        ? '🌟🎉 *JACKPOT 777! LUAR BIASA! KAMU MENANG BESAR!* 🎉🌟'
-        : `Nilai spin: *${slot.dice.value}* / 64.\nBelum jackpot, coba putar sekali lagi yuk!`;
+      setTimeout(async () => {
+        try {
+          // Nilai 64 adalah Jackpot 777 di Telegram
+          const isJackpot = slot.dice.value === 64;
+          const text = isJackpot
+            ? '🌟🎉 *JACKPOT 777! LUAR BIASA! KAMU MENANG BESAR!* 🎉🌟'
+            : `Nilai spin: *${slot.dice.value}* / 64.\nBelum jackpot, coba putar sekali lagi yuk!`;
 
-      await ctx.reply(text, {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🎰 Putar Lagi', callback_data: 'game_slot' }],
-            [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
-          ]
+          db.incrementStat('total_games_played');
+          await ctx.reply(text, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🎰 Putar Lagi', callback_data: 'game_slot' }],
+                [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+              ]
+            }
+          });
+        } catch (err) {
+          console.error('Slot result error:', err.message);
         }
-      });
-    }, 3000);
+      }, 3000);
+    } catch (err) {
+      console.error('Slot start error:', err.message);
+    }
     return;
   }
 
@@ -509,6 +618,7 @@ bot.on('callback_query', async (ctx) => {
     const choice = data.replace('suit_', '');
     const res = games.playSuit(choice);
     await ctx.answerCbQuery();
+    db.incrementStat('total_games_played');
 
     let title = '🤝 HASIL SERI!';
     if (res.result === 'win') title = '🎉 KAMU MENANG!';
@@ -545,7 +655,7 @@ bot.on('callback_query', async (ctx) => {
     return renderMenu(
       ctx,
       '🖼️ *EDIT FOTO BANNER BOT*\n\n' +
-      'Silakan *kirimkan foto baru* yang ingin Anda jadikan banner bot.\n' +
+      'Silakan *kirimkan foto baru* yang ingin Anda jadikan banner bot (sebagai Foto ataupun Dokumen).\n' +
       'Atau kirim teks URL gambar (misal: `https://example.com/banner.jpg`).\n\n' +
       '_Ketik /admin untuk membatalkan._',
       [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
@@ -558,9 +668,12 @@ bot.on('callback_query', async (ctx) => {
     return renderMenu(
       ctx,
       '🎶 *NAMBAHIN MUSIK DI BOT*\n\n' +
-      'Silakan *kirim file audio MP3* langsung ke obrolan ini.\n' +
+      'Silakan *kirim file audio MP3* langsung ke obrolan ini (boleh sebagai file Audio maupun Dokumen).\n' +
       'Atau kirim format teks:\n' +
       '`Judul Lagu | https://link-audio-langsung.mp3`\n\n' +
+      '📏 *Batas ukuran file MP3:*\n' +
+      '• Bot Telegram resmi (api.telegram.org) membatasi *upload dari bot* maksimal *50 MB* dan *download oleh bot* maksimal *20 MB*.\n' +
+      '• File yang kamu kirim ke bot ini disimpan sebagai referensi (file_id), jadi umumnya tetap aman diproses walau lebih dari 20 MB. Tapi untuk jaga-jaga (agar bisa diputar lancar ke semua user), disarankan tetap *di bawah 50 MB*.\n\n' +
       '_Ketik /admin untuk membatalkan._',
       [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
@@ -635,6 +748,51 @@ bot.on('photo', async (ctx) => {
   }
 });
 
+// Batas resmi Telegram Bot API: upload oleh bot 50MB, download oleh bot 20MB
+const BOT_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024;
+
+function formatFileSize(bytes) {
+  if (!bytes) return null;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function saveMusicTrack(ctx, { title, artist, fileId, fileSize }) {
+  const userId = ctx.from.id;
+  const track = {
+    id: `track_${Date.now()}`,
+    title: title || 'Musik Baru',
+    artist: artist || ctx.from.first_name || 'Admin',
+    type: 'file_id',
+    source: fileId,
+    added_by: ctx.from.first_name,
+    date: new Date().toISOString().split('T')[0]
+  };
+
+  db.addMusic(track);
+  adminMenu.clearAdminSession(userId);
+
+  const sizeText = formatFileSize(fileSize);
+  const sizeWarning = fileSize && fileSize > BOT_UPLOAD_LIMIT_BYTES
+    ? `\n\n⚠️ *Catatan:* Ukuran file ini *${sizeText}*, di atas batas upload resmi Bot API (*50 MB*). Referensinya tetap tersimpan, tapi kalau nanti gagal terkirim ke user, coba kompres file MP3-nya atau pakai link audio langsung.`
+    : (sizeText ? `\n\n📏 Ukuran file: *${sizeText}*` : '');
+
+  return ctx.reply(
+    `✅ *MUSIK BERHASIL DITAMBAHKAN!*\n\n` +
+    `🎶 *Judul:* ${track.title}\n` +
+    `👤 *Artis:* ${track.artist}\n` +
+    `💿 Musik sekarang sudah tersedia di Playlist untuk semua pengguna bot.${sizeWarning}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎵 Lihat Playlist Musik', callback_data: 'menu_music' }],
+          [{ text: '👑 Kembali ke Admin', callback_data: 'menu_admin' }]
+        ]
+      }
+    }
+  );
+}
+
 bot.on('audio', async (ctx) => {
   const userId = ctx.from.id;
   const session = adminMenu.getAdminSession(userId);
@@ -642,34 +800,50 @@ bot.on('audio', async (ctx) => {
   // Jika admin sedang dalam sesi nambah musik
   if (db.isAdmin(userId) && session && session.action === 'WAITING_MUSIC') {
     const audio = ctx.message.audio;
-    const track = {
-      id: `track_${Date.now()}`,
-      title: audio.title || audio.file_name || 'Musik Baru',
-      artist: audio.performer || ctx.from.first_name || 'Admin',
-      type: 'file_id',
-      source: audio.file_id,
-      added_by: ctx.from.first_name,
-      date: new Date().toISOString().split('T')[0]
-    };
+    return saveMusicTrack(ctx, {
+      title: audio.title || audio.file_name,
+      artist: audio.performer,
+      fileId: audio.file_id,
+      fileSize: audio.file_size
+    });
+  }
+});
 
-    db.addMusic(track);
+// ==========================================
+// PENANGANAN FILE DIKIRIM SEBAGAI "DOKUMEN"
+// (Banyak HP mengirim foto/mp3 sebagai Document, bukan Photo/Audio)
+// ==========================================
+bot.on('document', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = adminMenu.getAdminSession(userId);
+  if (!db.isAdmin(userId) || !session) return;
+
+  const doc = ctx.message.document;
+  const mime = doc.mime_type || '';
+  const fileName = doc.file_name || '';
+
+  if (session.action === 'WAITING_BANNER' && mime.startsWith('image/')) {
+    db.setBanner(doc.file_id, 'file_id');
     adminMenu.clearAdminSession(userId);
+    await ctx.reply('✅ *SUKSES!* Foto banner bot berhasil diperbarui.', { parse_mode: 'Markdown' });
+    return sendUserMainMenu(ctx, false);
+  }
 
-    return ctx.reply(
-      `✅ *MUSIK BERHASIL DITAMBAHKAN!*\n\n` +
-      `🎶 *Judul:* ${track.title}\n` +
-      `👤 *Artis:* ${track.artist}\n` +
-      `💿 Musik sekarang sudah tersedia di Playlist untuk semua pengguna bot.`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🎵 Lihat Playlist Musik', callback_data: 'menu_music' }],
-            [{ text: '👑 Kembali ke Admin', callback_data: 'menu_admin' }]
-          ]
-        }
-      }
-    );
+  if (session.action === 'WAITING_MUSIC' && (mime.startsWith('audio/') || /\.mp3$/i.test(fileName))) {
+    return saveMusicTrack(ctx, {
+      title: fileName.replace(/\.mp3$/i, ''),
+      artist: null,
+      fileId: doc.file_id,
+      fileSize: doc.file_size
+    });
+  }
+
+  if (session.action === 'WAITING_MUSIC') {
+    return ctx.reply('⚠️ Format file tidak dikenali sebagai audio. Harap kirim file MP3 yang valid.');
+  }
+
+  if (session.action === 'WAITING_BANNER') {
+    return ctx.reply('⚠️ Format file tidak dikenali sebagai gambar. Harap kirim file foto (JPG/PNG) yang valid.');
   }
 });
 
@@ -745,8 +919,14 @@ bot.on('text', async (ctx) => {
         try {
           await ctx.telegram.sendMessage(u.id, `📢 *PENGUMUMAN RESMI*\n\n${text}`, { parse_mode: 'Markdown' });
           sent++;
-        } catch {
-          failed++;
+        } catch (err) {
+          // Jika gagal karena format Markdown pengumuman tidak valid, coba kirim ulang sebagai teks polos
+          try {
+            await ctx.telegram.sendMessage(u.id, `📢 PENGUMUMAN RESMI\n\n${text}`);
+            sent++;
+          } catch {
+            failed++;
+          }
         }
       }
 
@@ -759,7 +939,18 @@ bot.on('text', async (ctx) => {
   if (games.getNumberGame(userId)) {
     const guessRes = games.processNumberGuess(userId, text);
     if (guessRes) {
-      db.incrementStat('total_games_played');
+      if (guessRes.status === 'win') {
+        db.incrementStat('total_games_played');
+        return ctx.reply(guessRes.message, {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Main Lagi', callback_data: 'game_number_start' }],
+              [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+            ]
+          }
+        });
+      }
       return ctx.reply(guessRes.message, { parse_mode: 'Markdown' });
     }
   }
@@ -783,6 +974,63 @@ bot.on('text', async (ctx) => {
         );
       } else {
         return ctx.reply(`❌ Jawaban belum tepat! Coba lagi.\n💡 Petunjuk: ${quizRes.hint}`);
+      }
+    }
+  }
+
+  if (games.getWordGame(userId)) {
+    const wordRes = games.answerWordGame(userId, text);
+    if (wordRes) {
+      if (wordRes.success) {
+        db.incrementStat('total_games_played');
+        return ctx.reply(
+          `🎉 *TEPAT SEKALI!*\n\nKata yang benar adalah: *${wordRes.word.toUpperCase()}*\n🔢 Percobaan: *${wordRes.attempts} kali*`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Kata Lain', callback_data: 'game_word_start' }],
+                [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+              ]
+            }
+          }
+        );
+      } else {
+        return ctx.reply(`❌ Belum tepat, coba lagi!\n💡 Petunjuk: ${wordRes.hint}`);
+      }
+    }
+  }
+
+  if (games.getMathGame(userId)) {
+    const mathRes = games.answerMathGame(userId, text);
+    if (mathRes) {
+      if (mathRes.success) {
+        db.incrementStat('total_games_played');
+        return ctx.reply(
+          `🎉 *BENAR!* Kamu menjawab dalam *${mathRes.elapsedSeconds} detik*.`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Soal Lagi', callback_data: 'game_math_start' }],
+                [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+              ]
+            }
+          }
+        );
+      } else {
+        return ctx.reply(
+          `❌ *Kurang tepat!* Jawaban yang benar adalah *${mathRes.correctAnswer}*.`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Coba Soal Lain', callback_data: 'game_math_start' }],
+                [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+              ]
+            }
+          }
+        );
       }
     }
   }
