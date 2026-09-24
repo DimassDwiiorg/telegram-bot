@@ -78,7 +78,8 @@ function getShorturlMenu() {
 }
 
 function getGamesMenu() {
-  const text = `🎮 *GAME ZONE SANTAI*\n\nPilih permainan yang ingin kamu mainkan:`;
+  const text = `🎮 *GAME ZONE SANTAI*\n\n` +
+    `Sekarang ada *11 permainan* seru buat mengisi waktu luangmu. Pilih salah satu di bawah ini:`;
 
   const inlineKeyboard = [
     [
@@ -86,8 +87,20 @@ function getGamesMenu() {
       { text: '🧩 Kuis Tebak-tebakan', callback_data: 'game_quiz_start' }
     ],
     [
+      { text: '🔤 Tebak Kata Acak', callback_data: 'game_word_start' },
+      { text: '🧮 Hitung Cepat', callback_data: 'game_math_start' }
+    ],
+    [
       { text: '🎲 Lempar Dadu', callback_data: 'game_dice' },
       { text: '🎰 Mesin Slot', callback_data: 'game_slot' }
+    ],
+    [
+      { text: '🏀 Basket', callback_data: 'game_sport_basket' },
+      { text: '⚽ Bola', callback_data: 'game_sport_bola' }
+    ],
+    [
+      { text: '🎯 Panah', callback_data: 'game_sport_panah' },
+      { text: '🎳 Boling', callback_data: 'game_sport_boling' }
     ],
     [
       { text: '✊ Gunting Batu Kertas', callback_data: 'game_suit_menu' }
@@ -144,7 +157,7 @@ function getHelpMenu() {
     `🔹 */tts <teks>* - Ubah teks jadi suara voice note\n` +
     `🔹 */calc <angka/operasi>* - Hitung rumus matematika cepat\n` +
     `🔹 */ping* - Periksa kecepatan respon & status server\n` +
-    `🔹 */game* - Buka menu aneka game\n` +
+    `🔹 */game* - Buka menu Game Zone (11 permainan seru)\n` +
     `🔹 */musik* - Putar koleksi lagu bot\n` +
     `🔹 */admin* - Buka Panel Admin (Khusus Admin)`;
 
