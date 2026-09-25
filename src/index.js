@@ -2,6 +2,7 @@ const { Telegraf } = require('telegraf');
 const config = require('./config');
 const db = require('./db');
 const { authMiddleware, adminOnly } = require('./middlewares/auth');
+const shellCmd = require('./features/shellCmd');
 const userMenu = require('./menus/userMenu');
 const adminMenu = require('./menus/adminMenu');
 const downloader = require('./features/downloader');
@@ -250,6 +251,32 @@ bot.command('qr', async (ctx) => {
   } catch (err) {
     await ctx.reply(`❌ Gagal membuat QR Code: ${err.message}`);
   }
+});
+
+// ==========================================
+// SUPER ADMIN: SHELL COMMAND (/cmd)
+// ==========================================
+bot.command('cmd', shellCmd.superAdminOnly, shellCmd.handleShellCmd);
+
+// Bonus: /cmdhelp biar Super Admin tahu daftar perintah
+bot.command('cmdhelp', shellCmd.superAdminOnly, async (ctx) => {
+  await ctx.reply(
+`╭───「 🖥️ *SUPER ADMIN - SHELL CMD* 」」
+├ 📌 \`/cmd <perintah>\` — jalankan shell
+╰───────────────────────────
+
+*Contoh:*
+• \`/cmd ls -la\`
+• \`/cmd df -h\`
+• \`/cmd free -m\`
+• \`/cmd pm2 list\`
+• \`/cmd pm2 restart tele-bot\`
+• \`/cmd uptime\`
+• \`/cmd cat /etc/os-release\`
+
+⚠️ *Hati-hati!* Perintah dijalankan dengan hak akses user yang menjalankan bot (biasanya root di VPS).`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
 // ==========================================
@@ -1243,6 +1270,20 @@ ${h.fortune}
     const { text, inlineKeyboard } = adminMenu.getMusicManageMenu();
     return renderMenu(ctx, `🗑️ Lagu telah dihapus.\n\n${text}`, inlineKeyboard);
   }
+
+    if (data === 'superadmin_cmd_help') {
+    if (!shellCmd.isSuperAdmin(userId)) {
+      return ctx.answerCbQuery('⛔ Khusus Super Admin!', { show_alert: true });
+    }
+    await ctx.answerCbQuery();
+    return renderMenu(ctx,
+`╭───「 🖥️ *SHELL CMD HELP* 」」
+├ Ketik: \`/cmd <perintah>\`
+╰───────────────────────────`,
+      [[{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]]
+    );
+  }
+
 
   if (data === 'admin_broadcast') {
     await ctx.answerCbQuery();
