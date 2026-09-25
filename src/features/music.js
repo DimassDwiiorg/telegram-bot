@@ -4,21 +4,30 @@ function formatMusicMenu() {
   const list = db.getMusicList();
   if (list.length === 0) {
     return {
-      text: "🎵 *PLAYLIST MUSIK BOT*\n\nSaat ini belum ada lagu di playlist bot.\n_Admin dapat menambahkan lagu melalui Panel Admin._",
-      buttons: [[{ text: '🔙 Kembali ke Menu Utama', callback_data: 'menu_main' }]]
+      text: 
+`╭───「 🎵 *PLAYLIST MUSIK BOT* 」
+├ ℹ️ Belum ada koleksi lagu di bot saat ini.
+├ 💡 _Admin dapat menambahkan audio lewat Panel Admin._
+╰───────────────────────────`,
+      buttons: [[{ text: '🔙 ❲ KEMBALI KE MENU ❳', callback_data: 'menu_main' }]]
     };
   }
 
-  let text = "🎵 *PLAYLIST MUSIK BOT*\n\nPilih lagu di bawah untuk langsung memutarnya di Telegram:\n\n";
+  let text = 
+`╭───「 🎵 *PLAYLIST MUSIK PREMIUM* 」
+├ 🎧 Putar audio favorit langsung di Telegram:
+`;
   const buttons = [];
 
   list.forEach((item, index) => {
     const num = index + 1;
-    text += `${num}. 🎶 *${item.title}* (${item.artist || 'Unknown'})\n`;
-    buttons.push([{ text: `▶️ Putar: ${item.title.slice(0, 25)}`, callback_data: `play_music_${item.id}` }]);
+    text += `├ ${num}. 🎶 *${item.title}* (${item.artist || 'Artis'})\n`;
+    buttons.push([{ text: `▶️ ❲ Putar: ${item.title.slice(0, 22)} ❳`, callback_data: `play_music_${item.id}` }]);
   });
 
-  buttons.push([{ text: '🔙 Kembali ke Menu Utama', callback_data: 'menu_main' }]);
+  text += `╰───────────────────────────`;
+
+  buttons.push([{ text: '🔙 ❲ KEMBALI KE MENU ❳', callback_data: 'menu_main' }]);
 
   return { text, buttons };
 }
@@ -36,14 +45,23 @@ async function handlePlayMusic(ctx, trackId) {
   try {
     if (track.type === 'file_id') {
       await ctx.replyWithAudio(track.source, {
-        caption: `🎶 *Sedang Memutar:* ${track.title}\n👤 *Artis:* ${track.artist || 'Bot Audio'}\n💿 Ditambahkan oleh Admin`,
+        caption: 
+`╭───「 🎶 *NOW PLAYING* 」
+├ 🏷️ *Judul:* ${track.title}
+├ 👤 *Artis:* ${track.artist || 'Bot Music'}
+├ 💿 *Status:* Premium Audio
+╰───────────────────────────`,
         parse_mode: 'Markdown'
       });
     } else if (track.type === 'url') {
       await ctx.replyWithAudio({ url: track.source }, {
         title: track.title,
         performer: track.artist || 'Bot Audio',
-        caption: `🎶 *Sedang Memutar:* ${track.title}\n👤 *Artis:* ${track.artist || 'Bot Audio'}`,
+        caption: 
+`╭───「 🎶 *NOW PLAYING* 」
+├ 🏷️ *Judul:* ${track.title}
+├ 👤 *Artis:* ${track.artist || 'Bot Music'}
+╰───────────────────────────`,
         parse_mode: 'Markdown'
       });
     }

@@ -85,7 +85,7 @@ async function runTests() {
   assert(userMenuObj.banner && userMenuObj.inlineKeyboard.length > 0, 'User menu should generate');
 
   const adminMenuObj = adminMenu.getAdminDashboard();
-  assert(adminMenuObj.text.includes('PANEL KENDALI ADMIN'), 'Admin dashboard should generate');
+  assert(adminMenuObj.text.includes('DASHBOARD ADMIN'), 'Admin dashboard should generate');
   console.log('   ✅ Generator User Menu & Admin Dashboard valid!\n');
 
   console.log('🎉 SEMUA PENGUJIAN MODUL BERHASIL 100%!');
