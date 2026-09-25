@@ -9,6 +9,7 @@ const shorturl = require('./features/shorturl');
 const music = require('./features/music');
 const games = require('./features/games');
 const tools = require('./features/tools');
+const sholat = require('./features/sholat');
 
 const botStartTime = Date.now();
 
@@ -32,15 +33,11 @@ async function sendUserMainMenu(ctx) {
   const firstName = ctx.from ? ctx.from.first_name : null;
   const { banner, caption, inlineKeyboard } = userMenu.getMainUserMenu(userId, firstName);
 
-  // Jika dipanggil dari klik tombol (callback query), hapus pesan sebelumnya agar rapi
   if (ctx.callbackQuery) {
-    try {
-      await ctx.deleteMessage().catch(() => {});
-    } catch (e) {}
+    try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
   }
 
   try {
-    // Kirim pesan baru berupa foto banner + caption + keyboard
     await ctx.replyWithPhoto(banner, {
       caption: caption,
       parse_mode: 'Markdown',
@@ -48,7 +45,6 @@ async function sendUserMainMenu(ctx) {
     });
   } catch (err) {
     console.error('Error sendUserMainMenu:', err.message);
-    // Jika banner gagal dimuat, kirim fallback teks
     await ctx.reply(caption, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: inlineKeyboard }
@@ -56,11 +52,8 @@ async function sendUserMainMenu(ctx) {
   }
 }
 
-// Helper untuk menampilkan menu baru sambil otomatis menghapus menu sebelumnya
 async function renderMenu(ctx, text, inlineKeyboard) {
-  try {
-    await ctx.deleteMessage().catch(() => {});
-  } catch (e) {}
+  try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
   return ctx.reply(text, {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: inlineKeyboard }
@@ -71,33 +64,23 @@ async function renderMenu(ctx, text, inlineKeyboard) {
 // COMMANDS DASAR
 // ==========================================
 bot.command(['start', 'menu'], async (ctx) => {
-  // Reset admin session if any
   adminMenu.clearAdminSession(ctx.from.id);
   await sendUserMainMenu(ctx, false);
 });
 
 bot.command('help', async (ctx) => {
   const { text, inlineKeyboard } = userMenu.getHelpMenu();
-  await ctx.reply(text, {
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: inlineKeyboard }
-  });
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
 });
 
 bot.command('game', async (ctx) => {
   const { text, inlineKeyboard } = userMenu.getGamesMenu();
-  await ctx.reply(text, {
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: inlineKeyboard }
-  });
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
 });
 
 bot.command('musik', async (ctx) => {
   const { text, buttons } = music.formatMusicMenu();
-  await ctx.reply(text, {
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: buttons }
-  });
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
 });
 
 // ==========================================
@@ -117,27 +100,91 @@ async function handleDownloadRequest(ctx, url) {
     db.incrementStat('total_downloads');
     await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id).catch(() => {});
 
-    const caption = `✅ *DOWNLOAD BERHASIL!*\n\n` +
-      `📌 *Platform:* ${result.platform}\n` +
-      `📝 *Judul:* ${result.title || 'Video'}\n` +
-      (result.author ? `👤 *Author:* ${result.author}\n` : '') +
-      `\n⚡ _Diunduh melalui ${config.botToken ? 'Bot' : 'Dimzz Bot'}_`;
+    const caption = 
+`╭───「 ✅ *DOWNLOAD BERHASIL* 」
+├ 📌 *Platform:* ${result.platform}
+├ 📝 *Judul:* ${result.title || 'Video Media'}
+` + (result.author ? `├ 👤 *Author:* ${result.author}\n` : '') +
+`├ ⚡ *Status:* High Quality (No Watermark)
+╰───────────────────────────`;
 
     if (result.videoUrl) {
+      let targetVid = result.videoUrl;
+      if (targetVid.startsWith('/')) {
+        targetVid = 'https://www.tikwm.com' + targetVid;
+      }
+
+      let sent = false;
+      // Metode 1: Stream bytes video langsung dari server VPS ke Telegram (user langsung dapat file video)
       try {
-        await ctx.replyWithVideo(result.videoUrl, {
-          caption: caption,
-          parse_mode: 'Markdown'
+        const streamRes = await axios({
+          method: 'get',
+          url: targetVid,
+          responseType: 'stream',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Referer': targetVid
+          },
+          timeout: 45000
         });
-      } catch (vidErr) {
-        // Jika file terlalu besar untuk bot kirim langsung, berikan link download langsung
-        await ctx.reply(`${caption}\n\n📥 *Link Download Langsung:*\n${result.videoUrl}`, { parse_mode: 'Markdown' });
+        await ctx.replyWithVideo({ source: streamRes.data }, { caption, parse_mode: 'Markdown' });
+        sent = true;
+      } catch (streamErr) {
+        console.error('[Stream Video Error, coba URL langsung]:', streamErr.message);
+      }
+
+      // Metode 2: Coba via URL langsung
+      if (!sent) {
+        try {
+          await ctx.replyWithVideo(targetVid, { caption, parse_mode: 'Markdown' });
+          sent = true;
+        } catch (urlErr) {
+          console.error('[URL Video Error, coba kirim Document .mp4]:', urlErr.message);
+        }
+      }
+
+      // Metode 3: Kirim sebagai dokumen video .mp4 (langsung bisa disimpan ke galeri oleh user)
+      if (!sent) {
+        try {
+          const docRes = await axios({
+            method: 'get',
+            url: targetVid,
+            responseType: 'stream',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            },
+            timeout: 45000
+          });
+          const safeName = (result.title || 'video').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30) || 'video';
+          await ctx.replyWithDocument(
+            { source: docRes.data, filename: `${safeName}.mp4` },
+            { caption, parse_mode: 'Markdown' }
+          );
+          sent = true;
+        } catch (docErr) {
+          console.error('[Document Stream Error]:', docErr.message);
+        }
+      }
+
+      if (!sent) {
+        await ctx.reply(`${caption}\n\n📥 *Link Download Langsung:*\n${targetVid}`, { parse_mode: 'Markdown' });
       }
     } else if (result.audioUrl) {
-      await ctx.replyWithAudio(result.audioUrl, {
-        caption: caption,
-        parse_mode: 'Markdown'
-      });
+      let targetAud = result.audioUrl;
+      if (targetAud.startsWith('/')) {
+        targetAud = 'https://www.tikwm.com' + targetAud;
+      }
+      try {
+        const streamAud = await axios({
+          method: 'get',
+          url: targetAud,
+          responseType: 'stream',
+          timeout: 30000
+        });
+        await ctx.replyWithAudio({ source: streamAud.data }, { caption, parse_mode: 'Markdown' });
+      } catch (audErr) {
+        await ctx.replyWithAudio(targetAud, { caption, parse_mode: 'Markdown' });
+      }
     }
 
   } catch (error) {
@@ -149,9 +196,7 @@ async function handleDownloadRequest(ctx, url) {
 
 bot.command('dl', async (ctx) => {
   const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!args) {
-    return ctx.reply('⚠️ *Format salah!*\nGunakan: `/dl https://link-video.com`', { parse_mode: 'Markdown' });
-  }
+  if (!args) return ctx.reply('⚠️ *Format salah!*\nGunakan: `/dl https://link-video.com`', { parse_mode: 'Markdown' });
   await handleDownloadRequest(ctx, args);
 });
 
@@ -160,23 +205,21 @@ bot.command('dl', async (ctx) => {
 // ==========================================
 bot.command('short', async (ctx) => {
   const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!args) {
-    return ctx.reply('⚠️ *Format salah!*\nGunakan: `/short https://link-panjang-anda.com`', { parse_mode: 'Markdown' });
-  }
+  if (!args) return ctx.reply('⚠️ *Format salah!*\nGunakan: `/short https://link-panjang-anda.com`', { parse_mode: 'Markdown' });
 
   const waitMsg = await ctx.reply('⏳ *Membuat shortlink...*', { parse_mode: 'Markdown' });
-
   try {
     const result = await shorturl.shortenUrl(args);
     await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id).catch(() => {});
-
     if (result.success) {
       db.incrementStat('total_shortlinks');
-      const text = `🎉 *SHORTLINK BERHASIL DIBUAT!*\n\n` +
-        `🔗 *Short URL:* \`${result.shortUrl}\`\n` +
-        `🌐 *Layanan:* ${result.provider}\n` +
-        `📥 *Original:* ${args}\n\n` +
-        `_Ketuk tautan untuk menyalin._`;
+      const text = 
+`╭───「 🎉 *SHORTLINK BERHASIL* 」
+├ 🔗 *Short URL:* \`${result.shortUrl}\`
+├ 🌐 *Layanan:* ${result.provider}
+├ 📥 *Original:* ${args}
+╰───────────────────────────
+💡 _Ketuk tautan di atas untuk menyalin._`;
       await ctx.reply(text, { parse_mode: 'Markdown' });
     } else {
       await ctx.reply(`❌ *Gagal:* ${result.error}`, { parse_mode: 'Markdown' });
@@ -192,14 +235,16 @@ bot.command('short', async (ctx) => {
 // ==========================================
 bot.command('qr', async (ctx) => {
   const text = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!text) {
-    return ctx.reply('⚠️ *Format salah!*\nGunakan: `/qr https://google.com` atau `/qr Teks Bebas`', { parse_mode: 'Markdown' });
-  }
-
+  if (!text) return ctx.reply('⚠️ *Format salah!*\nGunakan: `/qr https://google.com` atau `/qr Teks Bebas`', { parse_mode: 'Markdown' });
   try {
     const qrBuffer = await tools.generateQrBuffer(text);
     await ctx.replyWithPhoto({ source: qrBuffer }, {
-      caption: `📱 *QR CODE GENERATOR*\n\n📄 *Data:* \`${text}\`\n⚡ _Scan kode di atas menggunakan kamera smartphone._`,
+      caption: 
+`╭───「 📱 *QR CODE GENERATOR* 」
+├ 📄 *Data:* \`${text}\`
+├ ⚡ *Status:* High Resolution
+╰───────────────────────────
+💡 _Scan kode menggunakan kamera smartphone._`,
       parse_mode: 'Markdown'
     });
   } catch (err) {
@@ -212,14 +257,15 @@ bot.command('qr', async (ctx) => {
 // ==========================================
 bot.command('tts', async (ctx) => {
   const text = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!text) {
-    return ctx.reply('⚠️ *Format salah!*\nGunakan: `/tts Halo apa kabar kawan`', { parse_mode: 'Markdown' });
-  }
-
+  if (!text) return ctx.reply('⚠️ *Format salah!*\nGunakan: `/tts Halo apa kabar kawan`', { parse_mode: 'Markdown' });
   try {
     const ttsUrl = tools.getTtsAudioUrl(text, 'id');
     await ctx.replyWithVoice({ url: ttsUrl }, {
-      caption: `🗣️ *Text to Speech:*\n"${text}"`,
+      caption: 
+`╭───「 🗣️ *VOICE NOTE GENERATOR* 」
+├ 💬 *Teks:* "${text}"
+├ 🌐 *Bahasa:* Indonesia (ID)
+╰───────────────────────────`,
       parse_mode: 'Markdown'
     });
   } catch (err) {
@@ -232,15 +278,254 @@ bot.command('tts', async (ctx) => {
 // ==========================================
 bot.command('calc', async (ctx) => {
   const expr = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!expr) {
-    return ctx.reply('⚠️ *Format salah!*\nGunakan: `/calc 50 * 2 + 10`', { parse_mode: 'Markdown' });
-  }
-
+  if (!expr) return ctx.reply('⚠️ *Format salah!*\nGunakan: `/calc 50 * 2 + 10`', { parse_mode: 'Markdown' });
   const result = tools.calculateMath(expr);
   if (result !== null) {
-    await ctx.reply(`🧮 *HASIL PERHITUNGAN:*\n\n🔢 \`${expr}\` = *${result}*`, { parse_mode: 'Markdown' });
+    await ctx.reply(
+`╭───「 🧮 *HASIL PERHITUNGAN* 」
+├ 🔢 *Soal:* \`${expr}\`
+├ 🎯 *Hasil:* *${result}*
+╰───────────────────────────`, { parse_mode: 'Markdown' });
   } else {
     await ctx.reply('❌ Gagal menghitung. Pastikan rumus hanya berisi angka dan operator matematika valid (+, -, *, /, ^).');
+  }
+});
+
+// ==========================================
+// FITUR: CUACA (/cuaca <kota>)
+// ==========================================
+bot.command('cuaca', async (ctx) => {
+  const city = ctx.message.text.split(' ').slice(1).join(' ').trim() || 'Jakarta';
+  const waitMsg = await ctx.reply('🌤️ *Mengecek cuaca...*', { parse_mode: 'Markdown' });
+  const w = await tools.getWeather(city);
+  await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id).catch(() => {});
+  if (w.success) {
+    await ctx.reply(
+`╭───「 🌤️ *CUACA TERKINI* 」
+├ 📍 *Lokasi:* ${w.city}, ${w.country}
+├ 🌡️ *Suhu:* ${w.temp}°C (Terasa ${w.feelsLike}°C)
+├ ☁️ *Kondisi:* ${w.desc}
+├ 💧 *Kelembaban:* ${w.humidity}%
+├ 💨 *Angin:* ${w.wind} km/h (${w.windDir})
+├ 👁️ *Visibilitas:* ${w.visibility} km
+├ ☀️ *UV Index:* ${w.uvIndex}
+├ ☁️ *Awan:* ${w.cloudCover}%
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.reply(`❌ Gagal mendapatkan cuaca: ${w.error}`);
+  }
+});
+
+// ==========================================
+// FITUR: TRANSLATE (/translate <teks>)
+// ==========================================
+bot.command('translate', async (ctx) => {
+  const text = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!text) return ctx.reply('⚠️ *Format:*\n`/translate <teks>` ➔ ID ke EN\n`/translate en|id <teks>` ➔ EN ke ID', { parse_mode: 'Markdown' });
+  
+  let fromLang = 'id', toLang = 'en', query = text;
+  if (text.includes('|')) {
+    const parts = text.split('|');
+    if (parts.length >= 2 && parts[0].trim().length <= 5) {
+      const langs = parts[0].trim().split(/[\s>-]+/);
+      if (langs.length >= 2) { fromLang = langs[0]; toLang = langs[1]; }
+      query = parts.slice(1).join('|').trim();
+    }
+  }
+  
+  const waitMsg = await ctx.reply('🌐 *Menerjemahkan...*', { parse_mode: 'Markdown' });
+  const result = await tools.translateText(query, fromLang, toLang);
+  await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id).catch(() => {});
+  
+  if (result.success) {
+    await ctx.reply(
+`╭───「 🌐 *HASIL TERJEMAHAN* 」
+├ 🔤 *Dari:* ${result.from.toUpperCase()} ➔ ${result.to.toUpperCase()}
+├ 📝 *Asli:* "${query}"
+├ ✅ *Hasil:* "${result.translated}"
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.reply(`❌ Gagal menerjemahkan: ${result.error}`);
+  }
+});
+
+// ==========================================
+// FITUR: WIKIPEDIA (/wiki <topik>)
+// ==========================================
+bot.command('wiki', async (ctx) => {
+  const query = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!query) return ctx.reply('⚠️ *Format salah!*\nGunakan: `/wiki Indonesia`', { parse_mode: 'Markdown' });
+  
+  const waitMsg = await ctx.reply('📚 *Mencari di Wikipedia...*', { parse_mode: 'Markdown' });
+  const result = await tools.searchWikipedia(query);
+  await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id).catch(() => {});
+  
+  if (result.success) {
+    let msg = 
+`╭───「 📚 *WIKIPEDIA* 」
+├ 📖 *${result.title}*
+╰───────────────────────────
+
+${result.extract}`;
+    if (result.url) msg += `\n\n🔗 [Baca selengkapnya](${result.url})`;
+    await ctx.reply(msg, { parse_mode: 'Markdown', disable_web_page_preview: true });
+  } else {
+    await ctx.reply(`❌ ${result.error}`);
+  }
+});
+
+// ==========================================
+// FITUR: KURS MATA UANG (/kurs <jumlah> <dari> <ke>)
+// ==========================================
+bot.command('kurs', async (ctx) => {
+  const parts = ctx.message.text.split(' ').slice(1);
+  if (parts.length < 3) return ctx.reply('⚠️ *Format:* `/kurs 100 USD IDR`', { parse_mode: 'Markdown' });
+  
+  const amount = parseFloat(parts[0]);
+  const from = parts[1];
+  const to = parts[2];
+  if (isNaN(amount)) return ctx.reply('⚠️ Jumlah harus berupa angka!');
+  
+  const waitMsg = await ctx.reply('💱 *Mengkonversi...*', { parse_mode: 'Markdown' });
+  const result = await tools.convertCurrency(amount, from, to);
+  await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id).catch(() => {});
+  
+  if (result.success) {
+    await ctx.reply(
+`╭───「 💱 *KONVERSI MATA UANG* 」
+├ 💰 *${result.amount} ${result.from}* = *${result.result} ${result.to}*
+├ 📊 *Rate:* 1 ${result.from} = ${result.rate} ${result.to}
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.reply(`❌ Gagal konversi: ${result.error}`);
+  }
+});
+
+// ==========================================
+// FITUR: IP LOOKUP (/ip <address>)
+// ==========================================
+bot.command('ip', async (ctx) => {
+  const ip = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!ip) return ctx.reply('⚠️ *Format:* `/ip 8.8.8.8`', { parse_mode: 'Markdown' });
+  
+  const result = await tools.ipLookup(ip);
+  if (result.success) {
+    const d = result.data;
+    await ctx.reply(
+`╭───「 🌍 *IP ADDRESS LOOKUP* 」
+├ 🔍 *IP:* \`${d.query}\`
+├ 🌏 *Negara:* ${d.country}
+├ 🏙️ *Region:* ${d.regionName}
+├ 📍 *Kota:* ${d.city}
+├ 📮 *Zip:* ${d.zip}
+├ 📡 *ISP:* ${d.isp}
+├ 🏢 *Org:* ${d.org}
+├ 🕐 *Timezone:* ${d.timezone}
+├ 📐 *Koordinat:* ${d.lat}, ${d.lon}
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.reply(`❌ Gagal: ${result.error}`);
+  }
+});
+
+// ==========================================
+// FITUR: MAGIC 8-BALL (/8ball <pertanyaan>)
+// ==========================================
+bot.command('8ball', async (ctx) => {
+  const question = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!question) return ctx.reply('⚠️ *Format:* `/8ball Apakah aku akan sukses?`', { parse_mode: 'Markdown' });
+  const answer = games.magic8Ball();
+  await ctx.reply(
+`╭───「 🔮 *MAGIC 8-BALL* 」
+├ ❓ *Pertanyaan:* "${question}"
+├ 🎱 *Jawaban:* ${answer.text}
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+});
+
+// ==========================================
+// FITUR: UMUR (/umur <YYYY-MM-DD>)
+// ==========================================
+bot.command('umur', async (ctx) => {
+  const input = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!input) return ctx.reply('⚠️ *Format:* `/umur 2000-05-15`', { parse_mode: 'Markdown' });
+  const age = tools.calculateAge(input);
+  if (!age) return ctx.reply('❌ Format tanggal salah! Gunakan: YYYY-MM-DD');
+  await ctx.reply(
+`╭───「 🎂 *KALKULATOR UMUR* 」
+├ 📅 *Tanggal Lahir:* ${input}
+├ 🎉 *Umur:* ${age.years} tahun, ${age.months} bulan, ${age.days} hari
+├ 📊 *Total:* ${age.totalDays.toLocaleString()} hari
+├ 📆 *Total:* ${age.totalWeeks.toLocaleString()} minggu
+├ 🗓️ *Total:* ${age.totalMonths} bulan
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+});
+
+// ==========================================
+// FITUR: BMI (/bmi <berat> <tinggi>)
+// ==========================================
+bot.command('bmi', async (ctx) => {
+  const parts = ctx.message.text.split(' ').slice(1);
+  if (parts.length < 2) return ctx.reply('⚠️ *Format:* `/bmi 65 170` (berat kg, tinggi cm)', { parse_mode: 'Markdown' });
+  const weight = parseFloat(parts[0]);
+  const height = parseFloat(parts[1]);
+  if (isNaN(weight) || isNaN(height)) return ctx.reply('❌ Masukkan angka yang valid!');
+  const result = tools.calculateBMI(weight, height);
+  await ctx.reply(
+`╭───「 ⚖️ *BMI CALCULATOR* 」
+├ 🏋️ *Berat:* ${result.weight} kg
+├ 📏 *Tinggi:* ${result.height} cm
+├ 📊 *BMI:* ${result.bmi}
+├ ${result.emoji} *Kategori:* ${result.category}
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+});
+
+// ==========================================
+// FITUR: FANCY TEXT (/fancy <teks>)
+// ==========================================
+bot.command('fancy', async (ctx) => {
+  const text = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!text) return ctx.reply('⚠️ *Format:* `/fancy Hello World`', { parse_mode: 'Markdown' });
+  const styles = tools.toFancyText(text);
+  await ctx.reply(
+`╭───「 ✍️ *FANCY TEXT GENERATOR* 」
+├ 📝 *Original:* ${text}
+╰───────────────────────────
+
+𝐁𝐨𝐥𝐝: ${styles.bold}
+𝑰𝒕𝒂𝒍𝒊𝒄: ${styles.italic}
+𝙼𝚘𝚗𝚘: ${styles.monospace}
+Ⓒⓘⓡⓒⓛⓔ: ${styles.circled}
+
+💡 _Salin teks di atas untuk digunakan._`);
+});
+
+// ==========================================
+// FITUR: JADWAL SHOLAT (/sholat)
+// ==========================================
+bot.command('sholat', async (ctx) => {
+  const waitMsg = await ctx.reply('🕌 *Mengambil jadwal sholat...*', { parse_mode: 'Markdown' });
+  const times = await sholat.getPrayerTimesDisplay();
+  await ctx.telegram.deleteMessage(ctx.chat.id, waitMsg.message_id).catch(() => {});
+  
+  if (times) {
+    await ctx.reply(
+`╭───「 🕌 *JADWAL SHOLAT HARI INI* 」
+├ 📍 *Wilayah:* Jabodetabek (WIB)
+├ 📅 *Tanggal:* ${times.date}
+╰───────────────────────────
+
+╭───「 ⏰ *WAKTU SHOLAT* 」
+├ 🌅 *Subuh:*    \`${times.subuh} WIB\`
+├ ☀️ *Terbit:*    \`${times.sunrise} WIB\`
+├ ☀️ *Dzuhur:*   \`${times.dzuhur} WIB\`
+├ 🌇 *Ashar:*    \`${times.ashar} WIB\`
+├ 🌆 *Maghrib:*  \`${times.maghrib} WIB\`
+├ 🌙 *Isya:*     \`${times.isya} WIB\`
+╰───────────────────────────
+
+🤲 _Jangan lupa sholat tepat waktu!_`, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.reply('❌ Gagal mengambil jadwal sholat. Coba lagi nanti.');
   }
 });
 
@@ -249,9 +534,7 @@ bot.command('calc', async (ctx) => {
 // ==========================================
 async function replyPingStatus(ctx) {
   if (ctx.callbackQuery) {
-    try {
-      await ctx.deleteMessage().catch(() => {});
-    } catch (e) {}
+    try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
   }
   const start = Date.now();
   const pingMsg = await ctx.reply('📡 *Mengukur latensi server...*', { parse_mode: 'Markdown' });
@@ -261,20 +544,22 @@ async function replyPingStatus(ctx) {
   const users = db.getUserList();
   const admins = db.getAdmins();
 
-  const text = `⚡ *STATUS SERVER & SPESIFIKASI*\n\n` +
-    `📶 *Latensi Bot:* \`${latency} ms\`\n` +
-    `⏱️ *Bot Uptime:* \`${specs.uptime}\`\n` +
-    `🖥️ *Sistem Operasi:* \`${specs.os}\`\n` +
-    `🧠 *RAM Terpakai:* \`${specs.ram}\`\n` +
-    `⚙️ *CPU:* \`${specs.cpu} (${specs.cpuCores} Cores)\`\n` +
-    `🟢 *Node.js:* \`${specs.nodeVersion}\`\n\n` +
-    `👥 *Total Pengguna:* \`${users.length} user\`\n` +
-    `🛡️ *Total Admin:* \`${admins.length} admin\``;
+  const text = 
+`╭───「 ⚡ *STATUS SERVER & HOSTING* 」
+├ 📶 *Latensi Bot:* \`${latency} ms\`
+├ ⏱️ *Bot Uptime:* \`${specs.uptime}\`
+├ 🖥️ *Sistem Operasi:* \`${specs.os}\`
+├ 🧠 *RAM Terpakai:* \`${specs.ram}\`
+├ ⚙️ *CPU:* \`${specs.cpu} (${specs.cpuCores} Cores)\`
+├ 🟢 *Node.js:* \`${specs.nodeVersion}\`
+├ 👥 *Total Pengguna:* \`${users.length} user\`
+├ 🛡️ *Total Admin:* \`${admins.length} admin\`
+╰───────────────────────────`;
 
   await ctx.telegram.editMessageText(ctx.chat.id, pingMsg.message_id, undefined, text, {
     parse_mode: 'Markdown',
     reply_markup: {
-      inline_keyboard: [[{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]]
+      inline_keyboard: [[{ text: '🔙 ❲ KEMBALI KE MENU ❳', callback_data: 'menu_main' }]]
     }
   });
 }
@@ -287,10 +572,7 @@ bot.command('ping', replyPingStatus);
 bot.command('admin', adminOnly, async (ctx) => {
   adminMenu.clearAdminSession(ctx.from.id);
   const { text, inlineKeyboard } = adminMenu.getAdminDashboard();
-  await ctx.reply(text, {
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: inlineKeyboard }
-  });
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: inlineKeyboard } });
 });
 
 bot.command('addadmin', adminOnly, async (ctx) => {
@@ -299,7 +581,6 @@ bot.command('addadmin', adminOnly, async (ctx) => {
   if (!targetId || isNaN(targetId)) {
     return ctx.reply('⚠️ *Format salah!*\nGunakan: `/addadmin <Telegram_User_ID>`\nContoh: `/addadmin 123456789`', { parse_mode: 'Markdown' });
   }
-
   const success = db.addAdmin(targetId);
   if (success) {
     await ctx.reply(`✅ *Berhasil!* User ID \`${targetId}\` telah ditambahkan sebagai Admin Bot.`, { parse_mode: 'Markdown' });
@@ -311,14 +592,8 @@ bot.command('addadmin', adminOnly, async (ctx) => {
 bot.command('deladmin', adminOnly, async (ctx) => {
   const parts = ctx.message.text.split(' ');
   const targetId = parts[1] ? parts[1].trim() : null;
-  if (!targetId) {
-    return ctx.reply('⚠️ *Format salah!*\nGunakan: `/deladmin <Telegram_User_ID>`', { parse_mode: 'Markdown' });
-  }
-
-  if (targetId === String(config.ownerId)) {
-    return ctx.reply('⛔ Tidak dapat menghapus Super Owner dari daftar admin!');
-  }
-
+  if (!targetId) return ctx.reply('⚠️ *Format salah!*\nGunakan: `/deladmin <Telegram_User_ID>`', { parse_mode: 'Markdown' });
+  if (targetId === String(config.ownerId)) return ctx.reply('⛔ Tidak dapat menghapus Super Owner dari daftar admin!');
   const success = db.removeAdmin(targetId);
   if (success) {
     await ctx.reply(`✅ *Berhasil!* User ID \`${targetId}\` telah dihapus dari Admin.`, { parse_mode: 'Markdown' });
@@ -334,7 +609,7 @@ bot.on('callback_query', async (ctx) => {
   const data = ctx.callbackQuery.data;
   const userId = ctx.from.id;
 
-  // Navigasi Menu User
+  // ── Navigasi Menu User ──
   if (data === 'menu_main') {
     adminMenu.clearAdminSession(userId);
     await ctx.answerCbQuery();
@@ -376,6 +651,12 @@ bot.on('callback_query', async (ctx) => {
     return renderMenu(ctx, text, inlineKeyboard);
   }
 
+  if (data === 'menu_fun') {
+    await ctx.answerCbQuery();
+    const { text, inlineKeyboard } = userMenu.getFunMenu();
+    return renderMenu(ctx, text, inlineKeyboard);
+  }
+
   if (data === 'menu_help') {
     await ctx.answerCbQuery();
     const { text, inlineKeyboard } = userMenu.getHelpMenu();
@@ -387,7 +668,7 @@ bot.on('callback_query', async (ctx) => {
     return replyPingStatus(ctx);
   }
 
-  // Submenu Tools
+  // ── Tools Callbacks ──
   if (data === 'tool_qrcode_help') {
     await ctx.answerCbQuery();
     return renderMenu(ctx, '📱 *Cara Buat QR Code:*\nKetik `/qr <teks atau link>`\nContoh: `/qr https://instagram.com`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
@@ -412,12 +693,138 @@ bot.on('callback_query', async (ctx) => {
     return renderMenu(ctx, '🧮 *Kalkulator Cepat:*\nKetik `/calc <ekspresi matematika>`\nContoh: `/calc (150 * 4) / 2`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
   }
 
-  // Games Callback
+  if (data === 'tool_weather_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '🌤️ *Cek Cuaca Terkini:*\nKetik `/cuaca <nama kota>`\nContoh: `/cuaca Jakarta`\nContoh: `/cuaca Bandung`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_translate_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '🌐 *Translator:*\n`/translate <teks>` ➔ ID ke EN\n`/translate en id|<teks>` ➔ EN ke ID\n\nContoh:\n`/translate Selamat pagi`\n`/translate en id|Good morning`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_wiki_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '📚 *Wikipedia Search:*\nKetik `/wiki <topik>`\nContoh: `/wiki Indonesia`\nContoh: `/wiki Albert Einstein`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_currency_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '💱 *Konversi Mata Uang:*\nKetik `/kurs <jumlah> <dari> <ke>`\nContoh: `/kurs 100 USD IDR`\nContoh: `/kurs 1000000 IDR USD`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_password') {
+    await ctx.answerCbQuery();
+    const pw8 = tools.generatePassword(8);
+    const pw12 = tools.generatePassword(12);
+    const pw16 = tools.generatePassword(16);
+    const pw24 = tools.generatePassword(24);
+    return renderMenu(ctx,
+`╭───「 🔐 *PASSWORD GENERATOR* 」
+├ 8 karakter:  \`${pw8}\`
+├ 12 karakter: \`${pw12}\`
+├ 16 karakter: \`${pw16}\`
+├ 24 karakter: \`${pw24}\`
+╰───────────────────────────
+💡 _Ketuk password untuk menyalin._`, [
+      [{ text: '🔄 Generate Ulang', callback_data: 'tool_password' }],
+      [{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]
+    ]);
+  }
+
+  if (data === 'tool_base64_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '🔄 *Base64 Encode/Decode:*\n`/encode <teks>` ➔ Encode ke Base64\n`/decode <base64>` ➔ Decode dari Base64\n\nContoh: `/encode Hello World`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_ip_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '🌍 *IP Address Lookup:*\nKetik `/ip <alamat IP>`\nContoh: `/ip 8.8.8.8`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_color') {
+    await ctx.answerCbQuery();
+    const color = tools.getRandomColor();
+    return renderMenu(ctx,
+`╭───「 🎨 *RANDOM COLOR* 」
+├ 🔵 *HEX:* \`${color.hex}\`
+├ 🟢 *RGB:* \`${color.rgb}\`
+├ 🔴 R: ${color.r} | G: ${color.g} | B: ${color.b}
+╰───────────────────────────`, [
+      [{ text: '🔄 Warna Lain', callback_data: 'tool_color' }],
+      [{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]
+    ]);
+  }
+
+  if (data === 'tool_fancy_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '✍️ *Fancy Text Generator:*\nKetik `/fancy <teks>`\nContoh: `/fancy Hello World`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_wc_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '📊 *Word Counter:*\nKetik `/wc <teks>`\nContoh: `/wc Halo dunia ini adalah teks contoh`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_age_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '🎂 *Kalkulator Umur:*\nKetik `/umur <YYYY-MM-DD>`\nContoh: `/umur 2000-05-15`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_bmi_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '⚖️ *BMI Calculator:*\nKetik `/bmi <berat_kg> <tinggi_cm>`\nContoh: `/bmi 65 170`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_roman_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '🏛️ *Konversi Angka Romawi:*\nKetik `/romawi <angka>`\nContoh: `/romawi 2024`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  if (data === 'tool_countdown_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx, '⏳ *Countdown Timer:*\nKetik `/countdown <YYYY-MM-DD>`\nContoh: `/countdown 2025-01-01`', [[{ text: '🔙 Kembali ke Tools', callback_data: 'menu_tools' }]]);
+  }
+
+  // ── Sholat ──
+  if (data === 'tool_sholat') {
+    await ctx.answerCbQuery();
+    try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
+    const times = await sholat.getPrayerTimesDisplay();
+    if (times) {
+      return ctx.reply(
+`╭───「 🕌 *JADWAL SHOLAT HARI INI* 」
+├ 📍 *Wilayah:* Jabodetabek (WIB)
+├ 📅 *Tanggal:* ${times.date}
+╰───────────────────────────
+
+╭───「 ⏰ *WAKTU SHOLAT* 」
+├ 🌅 *Subuh:*    \`${times.subuh} WIB\`
+├ ☀️ *Terbit:*    \`${times.sunrise} WIB\`
+├ ☀️ *Dzuhur:*   \`${times.dzuhur} WIB\`
+├ 🌇 *Ashar:*    \`${times.ashar} WIB\`
+├ 🌆 *Maghrib:*  \`${times.maghrib} WIB\`
+├ 🌙 *Isya:*     \`${times.isya} WIB\`
+╰───────────────────────────
+
+🤲 _Jangan lupa sholat tepat waktu!_`, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[{ text: '🔙 ❲ KEMBALI KE MENU ❳', callback_data: 'menu_main' }]]
+        }
+      });
+    } else {
+      return ctx.reply('❌ Gagal mengambil jadwal sholat.', {
+        reply_markup: { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'menu_main' }]] }
+      });
+    }
+  }
+
+  // ── Games Callbacks ──
   if (data === 'game_number_start') {
     await ctx.answerCbQuery();
     games.startNumberGame(userId);
-    return renderMenu(
-      ctx,
+    return renderMenu(ctx,
       '🔢 *GAME TEBAK ANGKA DIMULAI!*\n\n' +
       'Saya telah memilih sebuah angka rahasia antara *1 sampai 100*.\n' +
       'Ketik tebakanmu langsung di obrolan ini!\n\n' +
@@ -429,14 +836,51 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'game_quiz_start') {
     await ctx.answerCbQuery();
     const quiz = games.getRandomRiddle(userId);
-    return renderMenu(
-      ctx,
-      `🧩 *KUIS TEBAK-TEBAKAN*\n\n` +
-      `❓ *Pertanyaan:*\n"${quiz.q}"\n\n` +
-      `💡 *Petunjuk:* ${quiz.hint}\n\n` +
-      `Ketik jawabanmu langsung di chat!`,
+    return renderMenu(ctx,
+      `🧩 *KUIS TEBAK-TEBAKAN*\n\n❓ *Pertanyaan:*\n"${quiz.q}"\n\n💡 *Petunjuk:* ${quiz.hint}\n\nKetik jawabanmu langsung di chat!`,
       [
         [{ text: '💡 Tebak-tebakan Lain', callback_data: 'game_quiz_start' }],
+        [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
+      ]
+    );
+  }
+
+  if (data === 'game_trivia_start') {
+    await ctx.answerCbQuery();
+    const trivia = games.getRandomTrivia(userId);
+    return renderMenu(ctx,
+`╭───「 🎯 *TRIVIA QUIZ* 」
+├ 📂 *Kategori:* ${trivia.category}
+╰───────────────────────────
+
+❓ *Pertanyaan:*
+"${trivia.q}"
+
+💡 *Petunjuk:* ${trivia.hint}
+
+📝 Ketik jawabanmu langsung di chat!`,
+      [
+        [{ text: '⏭️ Skip / Trivia Lain', callback_data: 'game_trivia_start' }],
+        [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
+      ]
+    );
+  }
+
+  if (data === 'game_emoji_start') {
+    await ctx.answerCbQuery();
+    const puzzle = games.getRandomEmojiPuzzle(userId);
+    return renderMenu(ctx,
+`╭───「 😜 *EMOJI PUZZLE* 」
+├ 🎯 Tebak kata dari emoji berikut:
+╰───────────────────────────
+
+${puzzle.emoji}
+
+💡 *Petunjuk:* ${puzzle.hint}
+
+📝 Ketik jawabanmu langsung di chat!`,
+      [
+        [{ text: '⏭️ Skip / Puzzle Lain', callback_data: 'game_emoji_start' }],
         [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
       ]
     );
@@ -447,26 +891,21 @@ bot.on('callback_query', async (ctx) => {
     try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
     await ctx.reply('🎲 *Kamu melempar dadu:*', { parse_mode: 'Markdown' });
     const userDice = await ctx.sendDice({ emoji: '🎲' });
-
     setTimeout(async () => {
       await ctx.reply('🤖 *Giliran Bot melempar dadu:*', { parse_mode: 'Markdown' });
       const botDice = await ctx.sendDice({ emoji: '🎲' });
-
       setTimeout(async () => {
         const uVal = userDice.dice.value;
         const bVal = botDice.dice.value;
         let outcome = '🤝 Seri! Kita sama kuat.';
         if (uVal > bVal) outcome = '🎉 Kamu MENANG! Dadu kamu lebih tinggi!';
         if (bVal > uVal) outcome = '🤖 Bot MENANG! Coba lempar lagi.';
-
         await ctx.reply(`🎯 *Hasil Pertandingan Dadu:*\n\nKamu: *${uVal}* 🎲\nBot: *${bVal}* 🎲\n\n${outcome}`, {
           parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🔄 Lempar Lagi', callback_data: 'game_dice' }],
-              [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
-            ]
-          }
+          reply_markup: { inline_keyboard: [
+            [{ text: '🔄 Lempar Lagi', callback_data: 'game_dice' }],
+            [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+          ]}
         });
       }, 3000);
     }, 2500);
@@ -478,22 +917,17 @@ bot.on('callback_query', async (ctx) => {
     try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
     await ctx.reply('🎰 *Mesin Slot Berputar...*', { parse_mode: 'Markdown' });
     const slot = await ctx.sendDice({ emoji: '🎰' });
-
     setTimeout(async () => {
-      // Nilai 64 adalah Jackpot 777 di Telegram
       const isJackpot = slot.dice.value === 64;
       const text = isJackpot
         ? '🌟🎉 *JACKPOT 777! LUAR BIASA! KAMU MENANG BESAR!* 🎉🌟'
         : `Nilai spin: *${slot.dice.value}* / 64.\nBelum jackpot, coba putar sekali lagi yuk!`;
-
       await ctx.reply(text, {
         parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🎰 Putar Lagi', callback_data: 'game_slot' }],
-            [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
-          ]
-        }
+        reply_markup: { inline_keyboard: [
+          [{ text: '🎰 Putar Lagi', callback_data: 'game_slot' }],
+          [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+        ]}
       });
     }, 3000);
     return;
@@ -509,20 +943,244 @@ bot.on('callback_query', async (ctx) => {
     const choice = data.replace('suit_', '');
     const res = games.playSuit(choice);
     await ctx.answerCbQuery();
-
     let title = '🤝 HASIL SERI!';
     if (res.result === 'win') title = '🎉 KAMU MENANG!';
     if (res.result === 'lose') title = '😢 BOT MENANG!';
-
-    return renderMenu(
-      ctx,
-      `✊✌️✋ *${title}*\n\n` +
-      `Pilihan Kamu: *${res.userChoice}*\nPilihan Bot: *${res.botChoice}*`,
+    return renderMenu(ctx,
+      `✊✌️✋ *${title}*\n\nPilihan Kamu: *${res.userChoice}*\nPilihan Bot: *${res.botChoice}*`,
       [
         [{ text: '🔄 Main Lagi', callback_data: 'game_suit_menu' }],
         [{ text: '🔙 Kembali ke Game Zone', callback_data: 'menu_games' }]
       ]
     );
+  }
+
+  // ── Coin Flip ──
+  if (data === 'game_coinflip') {
+    await ctx.answerCbQuery('Melempar koin...');
+    const coin = games.flipCoin();
+    return renderMenu(ctx,
+`╭───「 🪙 *COIN FLIP* 」
+├ ${coin.emoji} Hasil: *${coin.indo}*
+╰───────────────────────────`, [
+      [{ text: '🔄 Lempar Lagi', callback_data: 'game_coinflip' }],
+      [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+    ]);
+  }
+
+  // ── Magic 8-Ball ──
+  if (data === 'game_8ball_help') {
+    await ctx.answerCbQuery();
+    return renderMenu(ctx,
+`╭───「 🔮 *MAGIC 8-BALL* 」
+├ ❓ Tanyakan apapun kepada bola ajaib!
+├ 📝 Ketik: \`/8ball <pertanyaan>\`
+├ Contoh: \`/8ball Apakah aku akan sukses?\`
+╰───────────────────────────`, [[{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]]);
+  }
+
+  // ── Math Challenge ──
+  if (data === 'game_math_start') {
+    await ctx.answerCbQuery();
+    const challenge = games.startMathChallenge(userId);
+    return renderMenu(ctx,
+`╭───「 🧮 *MATH CHALLENGE!* 」
+├ ⚡ Jawab secepat mungkin!
+╰───────────────────────────
+
+❓ Berapakah hasil dari:
+
+*${challenge.problem} = ?*
+
+📝 Ketik jawabanmu langsung di chat!
+⏱️ _Waktu dimulai sekarang!_`, [
+      [{ text: '⏭️ Skip', callback_data: 'game_math_start' }],
+      [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+    ]);
+  }
+
+  // ── Word Game (Hangman) ──
+  if (data === 'game_word_start') {
+    await ctx.answerCbQuery();
+    const game = games.startWordGame(userId);
+    const display = games.getWordDisplay(game);
+    const hearts = '❤️'.repeat(game.maxWrong);
+    return renderMenu(ctx,
+`╭───「 📝 *TEBAK KATA* 」
+├ 🎯 Tebak huruf satu per satu!
+╰───────────────────────────
+
+📝 ${display}
+${hearts} (${game.maxWrong} nyawa)
+
+💡 *Petunjuk:* ${game.hint}
+
+📝 Ketik *satu huruf* di chat! (A-Z)`, [
+      [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+    ]);
+  }
+
+  // ── Lucky Number ──
+  if (data === 'game_lucky') {
+    await ctx.answerCbQuery();
+    const lucky = games.getLuckyNumber();
+    return renderMenu(ctx,
+`╭───「 🍀 *ANGKA KEBERUNTUNGAN* 」
+├ 🎰 *Angka Lucky-mu:* *${lucky.number}* / 100
+├ ${lucky.meaning}
+╰───────────────────────────`, [
+      [{ text: '🔄 Coba Lagi', callback_data: 'game_lucky' }],
+      [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+    ]);
+  }
+
+  // ── Truth or Dare ──
+  if (data === 'game_tod_menu') {
+    await ctx.answerCbQuery();
+    const { text, inlineKeyboard } = userMenu.getTodMenu();
+    return renderMenu(ctx, text, inlineKeyboard);
+  }
+
+  if (data === 'game_truth') {
+    await ctx.answerCbQuery();
+    const truth = games.getRandomTruth();
+    return renderMenu(ctx,
+`╭───「 💬 *TRUTH* 」
+├ 🔥 Jawab dengan JUJUR:
+╰───────────────────────────
+
+"${truth}"`, [
+      [{ text: '💬 Truth Lain', callback_data: 'game_truth' }],
+      [{ text: '⚡ Ganti ke Dare', callback_data: 'game_dare' }],
+      [{ text: '🔙 Kembali', callback_data: 'game_tod_menu' }]
+    ]);
+  }
+
+  if (data === 'game_dare') {
+    await ctx.answerCbQuery();
+    const dare = games.getRandomDare();
+    return renderMenu(ctx,
+`╭───「 ⚡ *DARE* 」
+├ 🔥 Lakukan tantangan ini:
+╰───────────────────────────
+
+"${dare}"`, [
+      [{ text: '⚡ Dare Lain', callback_data: 'game_dare' }],
+      [{ text: '💬 Ganti ke Truth', callback_data: 'game_truth' }],
+      [{ text: '🔙 Kembali', callback_data: 'game_tod_menu' }]
+    ]);
+  }
+
+  // ── Would You Rather ──
+  if (data === 'game_wyr') {
+    await ctx.answerCbQuery();
+    const wyr = games.getRandomWouldYouRather();
+    return renderMenu(ctx,
+`╭───「 🤔 *WOULD YOU RATHER* 」
+├ Pilih salah satu:
+╰───────────────────────────
+
+🅰️ ${wyr.a}
+
+     *ATAU*
+
+🅱️ ${wyr.b}
+
+🤔 _Mana yang kamu pilih?_`, [
+      [{ text: '🔄 Pertanyaan Lain', callback_data: 'game_wyr' }],
+      [{ text: '🔙 Kembali ke Game', callback_data: 'menu_games' }]
+    ]);
+  }
+
+  // ── Fun Zone Callbacks ──
+  if (data === 'fun_joke') {
+    await ctx.answerCbQuery();
+    const joke = tools.getRandomJoke();
+    return renderMenu(ctx,
+`╭───「 😂 *JOKES LUCU* 」
+╰───────────────────────────
+
+❓ *${joke.q}*
+
+💬 ${joke.a}`, [
+      [{ text: '😂 Joke Lain', callback_data: 'fun_joke' }],
+      [{ text: '🔙 Kembali', callback_data: 'menu_fun' }]
+    ]);
+  }
+
+  if (data === 'fun_fact') {
+    await ctx.answerCbQuery();
+    const fact = tools.getRandomFact();
+    return renderMenu(ctx,
+`╭───「 🧠 *FAKTA UNIK* 」
+╰───────────────────────────
+
+${fact}`, [
+      [{ text: '🧠 Fakta Lain', callback_data: 'fun_fact' }],
+      [{ text: '🔙 Kembali', callback_data: 'menu_fun' }]
+    ]);
+  }
+
+  if (data === 'fun_dog' || data === 'fun_cat') {
+    await ctx.answerCbQuery('Mencari foto...');
+    try { await ctx.deleteMessage().catch(() => {}); } catch (e) {}
+    const type = data === 'fun_dog' ? 'shibes' : 'cats';
+    const label = data === 'fun_dog' ? '🐕 Anjing' : '🐱 Kucing';
+    const result = await tools.getRandomAnimalImage(type);
+    if (result.success) {
+      try {
+        await ctx.replyWithPhoto(result.url, {
+          caption: `${label} Random! 🥰`,
+          reply_markup: { inline_keyboard: [
+            [{ text: `🔄 ${label} Lain`, callback_data: data }],
+            [{ text: '🔙 Kembali', callback_data: 'menu_fun' }]
+          ]}
+        });
+      } catch {
+        await ctx.reply(`❌ Gagal menampilkan foto. Coba lagi!`, {
+          reply_markup: { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'menu_fun' }]] }
+        });
+      }
+    } else {
+      await ctx.reply(`❌ ${result.error}`, {
+        reply_markup: { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'menu_fun' }]] }
+      });
+    }
+    return;
+  }
+
+  // ── Zodiac ──
+  if (data === 'fun_zodiac_menu') {
+    await ctx.answerCbQuery();
+    const { text, inlineKeyboard } = userMenu.getZodiacMenu();
+    return renderMenu(ctx, text, inlineKeyboard);
+  }
+
+  if (data.startsWith('zodiac_')) {
+    const zodiac = data.replace('zodiac_', '');
+    await ctx.answerCbQuery();
+    const h = games.getHoroscope(zodiac);
+    if (h) {
+      const stars = (n) => '⭐'.repeat(n) + '☆'.repeat(5 - n);
+      return renderMenu(ctx,
+`╭───「 ${h.emoji} *RAMALAN ${h.name.toUpperCase()}* 」
+├ 📅 *Periode:* ${h.period}
+╰───────────────────────────
+
+🔮 *Ramalan Hari Ini:*
+${h.fortune}
+
+╭───「 📊 *RATING* 」
+├ 💕 Cinta: ${stars(h.love)}
+├ 💼 Karir: ${stars(h.career)}
+├ 🏥 Kesehatan: ${stars(h.health)}
+├ 🍀 Keberuntungan: *${h.luck}%*
+╰───────────────────────────`, [
+        [{ text: '🔄 Refresh', callback_data: data }],
+        [{ text: '🔙 Pilih Zodiak Lain', callback_data: 'fun_zodiac_menu' }],
+        [{ text: '🔙 Kembali ke Fun', callback_data: 'menu_fun' }]
+      ]);
+    }
   }
 
   // ==========================================
@@ -542,12 +1200,8 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'admin_edit_banner') {
     await ctx.answerCbQuery();
     adminMenu.setAdminSession(userId, { action: 'WAITING_BANNER' });
-    return renderMenu(
-      ctx,
-      '🖼️ *EDIT FOTO BANNER BOT*\n\n' +
-      'Silakan *kirimkan foto baru* yang ingin Anda jadikan banner bot.\n' +
-      'Atau kirim teks URL gambar (misal: `https://example.com/banner.jpg`).\n\n' +
-      '_Ketik /admin untuk membatalkan._',
+    return renderMenu(ctx,
+      '🖼️ *EDIT FOTO BANNER BOT*\n\nSilakan *kirimkan foto baru* yang ingin Anda jadikan banner bot.\nAtau kirim teks URL gambar (misal: `https://example.com/banner.jpg`).\n\n_Ketik /admin untuk membatalkan._',
       [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
   }
@@ -555,13 +1209,8 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'admin_add_music') {
     await ctx.answerCbQuery();
     adminMenu.setAdminSession(userId, { action: 'WAITING_MUSIC' });
-    return renderMenu(
-      ctx,
-      '🎶 *NAMBAHIN MUSIK DI BOT*\n\n' +
-      'Silakan *kirim file audio MP3* langsung ke obrolan ini.\n' +
-      'Atau kirim format teks:\n' +
-      '`Judul Lagu | https://link-audio-langsung.mp3`\n\n' +
-      '_Ketik /admin untuk membatalkan._',
+    return renderMenu(ctx,
+      '🎶 *NAMBAHIN MUSIK DI BOT*\n\nSilakan *kirim file audio MP3* langsung ke obrolan ini.\nAtau kirim format teks:\n`Judul Lagu | https://link-audio-langsung.mp3`\n\n_Ketik /admin untuk membatalkan._',
       [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
   }
@@ -569,13 +1218,8 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'admin_add_user') {
     await ctx.answerCbQuery();
     adminMenu.setAdminSession(userId, { action: 'WAITING_ADMIN' });
-    return renderMenu(
-      ctx,
-      '👥 *TAMBAH ADMIN BARU*\n\n' +
-      'Silakan kirimkan *Telegram User ID* pengguna yang ingin dijadikan admin.\n' +
-      '_(User ID berupa angka, bisa didapatkan dari @userinfobot)_\n\n' +
-      'Contoh: `123456789`\n\n' +
-      '_Ketik /admin untuk membatalkan._',
+    return renderMenu(ctx,
+      '👥 *TAMBAH ADMIN BARU*\n\nSilakan kirimkan *Telegram User ID* pengguna yang ingin dijadikan admin.\n_(User ID berupa angka, bisa didapatkan dari @userinfobot)_\n\nContoh: `123456789`\n\n_Ketik /admin untuk membatalkan._',
       [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
   }
@@ -603,14 +1247,82 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'admin_broadcast') {
     await ctx.answerCbQuery();
     adminMenu.setAdminSession(userId, { action: 'WAITING_BROADCAST' });
-    return renderMenu(
-      ctx,
-      '📢 *SIARAN PESAN (BROADCAST)*\n\n' +
-      'Silakan ketik teks pengumuman yang akan dikirimkan ke SEMUA pengguna bot.\n\n' +
-      '_Ketik /admin untuk membatalkan._',
+    return renderMenu(ctx,
+      '📢 *SIARAN PESAN (BROADCAST)*\n\nSilakan ketik teks pengumuman yang akan dikirimkan ke SEMUA pengguna bot.\n\n_Ketik /admin untuk membatalkan._',
       [[{ text: '🔙 Batal / Kembali ke Admin', callback_data: 'menu_admin' }]]
     );
   }
+});
+
+// ==========================================
+// ADDITIONAL COMMANDS (Base64, Word Count, Roman, Countdown)
+// ==========================================
+bot.command('encode', async (ctx) => {
+  const text = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!text) return ctx.reply('⚠️ *Format:* `/encode <teks>`', { parse_mode: 'Markdown' });
+  const encoded = tools.base64Encode(text);
+  await ctx.reply(
+`╭───「 🔄 *BASE64 ENCODE* 」
+├ 📝 *Input:* "${text}"
+├ ✅ *Output:* \`${encoded}\`
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+});
+
+bot.command('decode', async (ctx) => {
+  const text = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!text) return ctx.reply('⚠️ *Format:* `/decode <base64>`', { parse_mode: 'Markdown' });
+  const decoded = tools.base64Decode(text);
+  if (decoded !== null) {
+    await ctx.reply(
+`╭───「 🔄 *BASE64 DECODE* 」
+├ 📝 *Input:* \`${text}\`
+├ ✅ *Output:* "${decoded}"
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.reply('❌ Gagal decode. Pastikan input adalah Base64 yang valid.');
+  }
+});
+
+bot.command('wc', async (ctx) => {
+  const text = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!text) return ctx.reply('⚠️ *Format:* `/wc <teks>`', { parse_mode: 'Markdown' });
+  const count = tools.countText(text);
+  await ctx.reply(
+`╭───「 📊 *WORD COUNTER* 」
+├ 📝 *Karakter:* ${count.chars}
+├ 🔤 *Karakter (tanpa spasi):* ${count.charsNoSpace}
+├ 📖 *Kata:* ${count.words}
+├ 📄 *Kalimat:* ${count.sentences}
+├ 📃 *Baris:* ${count.lines}
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+});
+
+bot.command('romawi', async (ctx) => {
+  const num = parseInt(ctx.message.text.split(' ').slice(1).join(' ').trim(), 10);
+  if (isNaN(num) || num < 1 || num > 3999) return ctx.reply('⚠️ *Format:* `/romawi <angka 1-3999>`', { parse_mode: 'Markdown' });
+  const roman = tools.toRoman(num);
+  await ctx.reply(
+`╭───「 🏛️ *ANGKA ROMAWI* 」
+├ 🔢 *Angka:* ${num}
+├ 🏛️ *Romawi:* *${roman}*
+╰───────────────────────────`, { parse_mode: 'Markdown' });
+});
+
+bot.command('countdown', async (ctx) => {
+  const input = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!input) return ctx.reply('⚠️ *Format:* `/countdown 2025-01-01`', { parse_mode: 'Markdown' });
+  const cd = tools.getCountdown(input);
+  if (!cd) return ctx.reply('❌ Format tanggal salah! Gunakan: YYYY-MM-DD');
+  if (cd.expired) return ctx.reply('⏰ Tanggal tersebut sudah lewat!');
+  await ctx.reply(
+`╭───「 ⏳ *COUNTDOWN* 」
+├ 🎯 *Target:* ${input}
+├ ⏰ *Sisa Waktu:*
+├ 📅 *${cd.days}* hari
+├ ⏰ *${cd.hours}* jam
+├ ⏱️ *${cd.minutes}* menit
+├ ⏲️ *${cd.seconds}* detik
+╰───────────────────────────`, { parse_mode: 'Markdown' });
 });
 
 // ==========================================
@@ -620,17 +1332,12 @@ bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const session = adminMenu.getAdminSession(userId);
 
-  // Jika admin sedang dalam sesi ganti banner
   if (db.isAdmin(userId) && session && session.action === 'WAITING_BANNER') {
-    // Ambil photo resolusi tertinggi (elemen terakhir dari array photo)
     const photos = ctx.message.photo;
     const fileId = photos[photos.length - 1].file_id;
-
     db.setBanner(fileId, 'file_id');
     adminMenu.clearAdminSession(userId);
-
     await ctx.reply('✅ *SUKSES!* Foto banner bot berhasil diperbarui.', { parse_mode: 'Markdown' });
-    // Tampilkan preview banner baru
     return sendUserMainMenu(ctx, false);
   }
 });
@@ -639,7 +1346,6 @@ bot.on('audio', async (ctx) => {
   const userId = ctx.from.id;
   const session = adminMenu.getAdminSession(userId);
 
-  // Jika admin sedang dalam sesi nambah musik
   if (db.isAdmin(userId) && session && session.action === 'WAITING_MUSIC') {
     const audio = ctx.message.audio;
     const track = {
@@ -656,18 +1362,13 @@ bot.on('audio', async (ctx) => {
     adminMenu.clearAdminSession(userId);
 
     return ctx.reply(
-      `✅ *MUSIK BERHASIL DITAMBAHKAN!*\n\n` +
-      `🎶 *Judul:* ${track.title}\n` +
-      `👤 *Artis:* ${track.artist}\n` +
-      `💿 Musik sekarang sudah tersedia di Playlist untuk semua pengguna bot.`,
+      `✅ *MUSIK BERHASIL DITAMBAHKAN!*\n\n🎶 *Judul:* ${track.title}\n👤 *Artis:* ${track.artist}\n💿 Musik sekarang sudah tersedia di Playlist untuk semua pengguna bot.`,
       {
         parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🎵 Lihat Playlist Musik', callback_data: 'menu_music' }],
-            [{ text: '👑 Kembali ke Admin', callback_data: 'menu_admin' }]
-          ]
-        }
+        reply_markup: { inline_keyboard: [
+          [{ text: '🎵 Lihat Playlist Musik', callback_data: 'menu_music' }],
+          [{ text: '👑 Kembali ke Admin', callback_data: 'menu_admin' }]
+        ]}
       }
     );
   }
@@ -726,9 +1427,7 @@ bot.on('text', async (ctx) => {
         `✅ *BERHASIL!* Pengguna dengan ID \`${targetId}\` sekarang telah menjadi Admin Bot.`,
         {
           parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[{ text: '👑 Kembali ke Admin Panel', callback_data: 'menu_admin' }]]
-          }
+          reply_markup: { inline_keyboard: [[{ text: '👑 Kembali ke Admin Panel', callback_data: 'menu_admin' }]] }
         }
       );
     }
@@ -755,7 +1454,39 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  // 2. Active Guessing Games
+  // 2. Active Games - Math Challenge
+  if (games.getMathGame(userId)) {
+    const result = games.processMathAnswer(userId, text);
+    if (result) {
+      db.incrementStat('total_games_played');
+      return ctx.reply(result.message, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [
+          [{ text: '🧮 Main Lagi', callback_data: 'game_math_start' }],
+          [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+        ]}
+      });
+    }
+  }
+
+  // 3. Active Games - Word Game (Hangman)
+  if (games.getWordGame(userId)) {
+    const result = games.processWordGuess(userId, text);
+    if (result) {
+      if (result.status === 'win' || result.status === 'lose') {
+        db.incrementStat('total_games_played');
+      }
+      return ctx.reply(result.message, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📝 Main Lagi', callback_data: 'game_word_start' }],
+          [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+        ]}
+      });
+    }
+  }
+
+  // 4. Active Guessing Games
   if (games.getNumberGame(userId)) {
     const guessRes = games.processNumberGuess(userId, text);
     if (guessRes) {
@@ -764,6 +1495,7 @@ bot.on('text', async (ctx) => {
     }
   }
 
+  // 5. Active Quiz/Trivia/Emoji
   if (games.getActiveRiddle(userId)) {
     const quizRes = games.answerRiddle(userId, text);
     if (quizRes) {
@@ -773,12 +1505,11 @@ bot.on('text', async (ctx) => {
           `🎉 *BENAR SEKALI! JAWABANMU TEPAT!*\n\nJawabannya adalah: *${quizRes.answer}*`,
           {
             parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🧩 Kuis Lainnya', callback_data: 'game_quiz_start' }],
-                [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
-              ]
-            }
+            reply_markup: { inline_keyboard: [
+              [{ text: '🧩 Kuis Lainnya', callback_data: 'game_quiz_start' }],
+              [{ text: '🎯 Trivia Quiz', callback_data: 'game_trivia_start' }],
+              [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+            ]}
           }
         );
       } else {
@@ -787,12 +1518,12 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  // 3. Auto-detect Video URL
+  // 6. Auto-detect Video URL
   if (downloader.detectPlatform(text)) {
     return handleDownloadRequest(ctx, text);
   }
 
-  // 4. Default Fallback untuk chat biasa
+  // 7. Default Fallback
   if (text.startsWith('/')) {
     return ctx.reply('⚠️ Perintah tidak dikenali. Ketik /menu untuk melihat semua fitur bot.');
   }
@@ -807,14 +1538,23 @@ bot.catch((err, ctx) => {
 // STARTING BOT
 // ==========================================
 console.log('==============================================');
-console.log('🤖 TELEGRAM BOT MULTIFUNGSI SIAP DINYALAKAN');
+console.log('🤖 TELEGRAM BOT MULTIFUNGSI PREMIUM v2.0');
 console.log(`📁 Lokasi: ${__dirname}`);
 console.log(`👑 Owner ID: ${config.ownerId || 'Belum diatur'}`);
 console.log('==============================================');
 
-bot.telegram.getMe().then((me) => {
+bot.telegram.getMe().then(async (me) => {
   console.log(`🚀 Terhubung sebagai @${me.username} (${me.first_name})`);
   console.log('Bot aktif dalam mode Long Polling (Siap menerima pesan).');
+  
+  // Initialize prayer time reminders
+  try {
+    await sholat.initSholatReminder(bot);
+    console.log('🕌 Prayer time reminder system initialized successfully!');
+  } catch (err) {
+    console.error('⚠️ Failed to initialize prayer reminders:', err.message);
+  }
+  
   return bot.launch();
 }).catch((err) => {
   console.error('❌ Gagal menjalankan bot Telegram:', err.message);
