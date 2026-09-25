@@ -79,6 +79,27 @@ const HEADERS = {
   'Cookie': 'NEXT_LOCALE=id'
 };
 
+// Pilih link video/audio dari field "medias" hasil scrape.
+function pickMediaUrls(data) {
+  let videoUrl = null;
+  let audioUrl = null;
+
+  if (data && data.medias && Array.isArray(data.medias) && data.medias.length > 0) {
+    const vid = data.medias.find(m => m.type === 'video');
+    const aud = data.medias.find(m => m.type === 'audio');
+    if (vid) videoUrl = vid.url;
+    if (aud) audioUrl = aud.url;
+
+    if (!videoUrl && !audioUrl && data.medias[0] && data.medias[0].url) {
+      videoUrl = data.medias[0].url;
+    }
+  } else if (data && data.url) {
+    videoUrl = data.url;
+  }
+
+  return { videoUrl, audioUrl };
+}
+
 let sessionCache = { sessionId: null, cookieHeader: 'NEXT_LOCALE=id', timestamp: 0 };
 
 async function getSession(force = false) {
@@ -124,28 +145,23 @@ async function downloadGetdl(cleanUrl) {
     }
 
     if (res.data && res.data.success && res.data.data) {
-      const data = res.data.data;
-      let videoUrl = null;
-      let audioUrl = null;
+      const { videoUrl, audioUrl } = pickMediaUrls(data);
 
-      if (data.medias && Array.isArray(data.medias)) {
-        const vid = data.medias.find(m => m.type === 'video') || data.medias[0];
-        if (vid) videoUrl = vid.url;
-        const aud = data.medias.find(m => m.type === 'audio');
-        if (aud) audioUrl = aud.url;
-      } else if (data.url) {
-        videoUrl = data.url;
-      }
-
-      if (videoUrl || audioUrl) {
+      if (!videoUrl && !audioUrl) {
         return {
-          success: true,
-          title: data.title || 'Media Download',
-          videoUrl,
-          audioUrl,
-          thumbnail: data.thumbnail || null
+          success: false,
+          error: 'Server merespons tapi tidak ada link media yang valid ditemukan.'
         };
       }
+
+      return {
+        success: true,
+        title: data.title || 'Video Downloader Result',
+        author: data.author || null,
+        videoUrl: videoUrl,
+        audioUrl: audioUrl,
+        thumbnail: data.thumbnail || null
+      };
     }
   } catch (err) {
     // ignore
@@ -524,5 +540,6 @@ async function downloadMedia(targetUrl) {
 module.exports = {
   PLATFORMS,
   detectPlatform,
-  downloadMedia
+  downloadMedia,
+  pickMediaUrls
 };

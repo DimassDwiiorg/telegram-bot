@@ -1456,33 +1456,60 @@ bot.on('text', async (ctx) => {
 
   // 2. Active Games - Math Challenge
   if (games.getMathGame(userId)) {
-    const result = games.processMathAnswer(userId, text);
-    if (result) {
-      db.incrementStat('total_games_played');
-      return ctx.reply(result.message, {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [
-          [{ text: '🧮 Main Lagi', callback_data: 'game_math_start' }],
-          [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
-        ]}
-      });
+    const mathRes = games.answerMathGame(userId, text);
+    if (mathRes) {
+      if (mathRes.success) {
+        db.incrementStat('total_games_played');
+        return ctx.reply(
+          `🎉 *BENAR!* Kamu menjawab dalam *${mathRes.elapsedSeconds} detik*.`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Soal Lagi', callback_data: 'game_math_start' }],
+                [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+              ]
+            }
+          }
+        );
+      } else {
+        return ctx.reply(
+          `❌ *Kurang tepat!* Jawaban yang benar adalah *${mathRes.correctAnswer}*.`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Coba Soal Lain', callback_data: 'game_math_start' }],
+                [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+              ]
+            }
+          }
+        );
+      }
     }
   }
 
-  // 3. Active Games - Word Game (Hangman)
+  // 3. Active Games - Word Game
   if (games.getWordGame(userId)) {
-    const result = games.processWordGuess(userId, text);
-    if (result) {
-      if (result.status === 'win' || result.status === 'lose') {
+    const wordRes = games.answerWordGame(userId, text);
+    if (wordRes) {
+      if (wordRes.success) {
         db.incrementStat('total_games_played');
+        return ctx.reply(
+          `🎉 *TEPAT SEKALI!*\n\nKata yang benar adalah: *${wordRes.word.toUpperCase()}*\n🔢 Percobaan: *${wordRes.attempts} kali*`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Kata Lain', callback_data: 'game_word_start' }],
+                [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
+              ]
+            }
+          }
+        );
+      } else {
+        return ctx.reply(`❌ Belum tepat, coba lagi!\n💡 Petunjuk: ${wordRes.hint}`);
       }
-      return ctx.reply(result.message, {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [
-          [{ text: '📝 Main Lagi', callback_data: 'game_word_start' }],
-          [{ text: '🔙 Kembali ke Menu', callback_data: 'menu_main' }]
-        ]}
-      });
     }
   }
 

@@ -38,6 +38,26 @@ async function runTests() {
   assert(ytDetect && ytDetect.id === 'youtube', 'YouTube should be detected');
   console.log('   ✅ Deteksi TikTok, Instagram, YouTube, FB berfungsi akurat!\n');
 
+  // Test 2b: pickMediaUrls - regresi untuk bug "audio dianggap video" & "sukses tanpa media"
+  const mixedMedia = downloader.pickMediaUrls({
+    medias: [
+      { type: 'audio', url: 'https://example.com/audio.mp3' },
+      { type: 'video', url: 'https://example.com/video.mp4' }
+    ]
+  });
+  assert(mixedMedia.videoUrl === 'https://example.com/video.mp4', 'Video url should map to video type, not first element');
+  assert(mixedMedia.audioUrl === 'https://example.com/audio.mp3', 'Audio url should map to audio type');
+
+  const audioOnlyMedia = downloader.pickMediaUrls({
+    medias: [{ type: 'audio', url: 'https://example.com/song.mp3' }]
+  });
+  assert(audioOnlyMedia.audioUrl === 'https://example.com/song.mp3', 'Audio-only media should not be mislabeled as video');
+  assert(!audioOnlyMedia.videoUrl, 'Audio-only media should leave videoUrl empty');
+
+  const emptyMedia = downloader.pickMediaUrls({ medias: [] });
+  assert(!emptyMedia.videoUrl && !emptyMedia.audioUrl, 'Empty medias array should yield no urls (bukan dianggap sukses)');
+  console.log('   ✅ pickMediaUrls: tidak lagi salah label audio jadi video, dan medias kosong tidak dianggap berhasil!\n');
+
   // Test 3: Short URL test
   console.log('3️⃣ Menguji Short URL (is.gd / TinyURL)...');
   try {
@@ -77,7 +97,30 @@ async function runTests() {
 
   const riddle = games.getRandomRiddle(testPlayer);
   assert(riddle.q && riddle.a, 'Riddle should have question and answer');
-  console.log('   ✅ Game Tebak Angka, Kuis Tebak-tebakan, dan Suit berjalan normal!\n');
+
+  // Tebak Kata (Acak Kata)
+  const wordSession = games.startWordGame(testPlayer);
+  assert(wordSession.scrambled && wordSession.hint, 'Word game should return scrambled word and hint');
+  const wrongWordGuess = games.answerWordGame(testPlayer, 'xxxxxxxxx');
+  assert(wrongWordGuess.success === false, 'Wrong word guess should fail');
+  const activeWord = games.getWordGame(testPlayer);
+  assert(activeWord && activeWord.word, 'Active word game should still be retrievable');
+  const correctWordGuess = games.answerWordGame(testPlayer, activeWord.word);
+  assert(correctWordGuess.success === true, 'Correct word guess should succeed');
+
+  // Hitung Cepat (Math Sprint)
+  games.startMathGame(testPlayer);
+  const activeMath = games.getMathGame(testPlayer);
+  assert(activeMath && typeof activeMath.answer === 'number', 'Math game should have a numeric answer');
+  const correctMathGuess = games.answerMathGame(testPlayer, activeMath.answer);
+  assert(correctMathGuess.success === true, 'Correct math answer should succeed');
+
+  // Bersihkan semua sesi game aktif
+  games.startNumberGame(testPlayer);
+  games.clearAllGames(testPlayer);
+  assert(games.hasActiveGame(testPlayer) === false, 'All games should be cleared for the player');
+
+  console.log('   ✅ Game Tebak Angka, Kuis, Tebak Kata, Hitung Cepat, dan Suit berjalan normal!\n');
 
   // Test 6: Menus
   console.log('6️⃣ Menguji Generator Menu User & Admin...');
